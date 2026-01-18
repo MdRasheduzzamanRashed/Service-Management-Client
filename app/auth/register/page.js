@@ -5,7 +5,9 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import { AuthContext } from "../../../context/AuthContext";
 
-const API = "http://localhost:8000";
+const API =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 export default function RegisterPage() {
   const router = useRouter();

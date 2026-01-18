@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useContext } from "react";
+import { useState, useContext, useMemo } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { AuthContext } from "../../../context/AuthContext";
 
-const API_BASE = "http://localhost:8000";
+// ✅ Use env in production (Vercel), fallback to localhost in dev
+const API =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,21 +40,35 @@ export default function LoginPage() {
     setPopup((p) => ({ ...p, open: false }));
   }
 
+  const canSubmit = useMemo(() => {
+    return form.username.trim().length > 0 && form.password.trim().length > 0;
+  }, [form.username, form.password]);
+
   async function handleLogin(e) {
     e.preventDefault();
     setError("");
-    setLoading(true);
     closePopup();
+
+    if (!API) {
+      setError(
+        "API URL is missing. Set NEXT_PUBLIC_API_BASE in Vercel environment variables.",
+      );
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const payload = {
-        // ✅ backend stores normalized username (lowercase)
         username: form.username.trim().toLowerCase(),
         password: form.password,
       };
 
       // ✅ Style 1 endpoint
-      const res = await axios.post(`${API_BASE}/api/auth/login`, payload);
+      const res = await axios.post(`${API}/api/auth/login`, payload, {
+        headers: { "Content-Type": "application/json" },
+        withCredentials: true, // safe even if you don't use cookies
+      });
 
       const rawUser = res.data?.user || {};
       const token = res.data?.token || "";
@@ -61,10 +78,10 @@ export default function LoginPage() {
         typeof rawId === "string"
           ? rawId
           : rawId?.$oid
-          ? String(rawId.$oid)
-          : rawId
-          ? String(rawId)
-          : null;
+            ? String(rawId.$oid)
+            : rawId
+              ? String(rawId)
+              : null;
 
       if (!normalizedId || !rawUser.role || !token) {
         throw new Error("Invalid user payload from server");
@@ -83,7 +100,6 @@ export default function LoginPage() {
 
       setError(msg);
 
-      // ✅ Typical wrong login = 400
       if (status === 400 || status === 401) {
         openPopup({
           title: "Login failed",
@@ -92,17 +108,13 @@ export default function LoginPage() {
           actionText: "Go to Register",
           actionHref: "/auth/register",
         });
-      }
-
-      if (status === 403) {
+      } else if (status === 403) {
         openPopup({
           title: "Access denied",
           message:
             "You are not authorized to use this system. Please contact admin.",
         });
-      }
-
-      if (status === 503) {
+      } else if (status === 503) {
         openPopup({
           title: "Service unavailable",
           message: "Server is unavailable right now. Please try again later.",
@@ -112,9 +124,6 @@ export default function LoginPage() {
       setLoading(false);
     }
   }
-
-  const canSubmit =
-    form.username.trim().length > 0 && form.password.trim().length > 0;
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-slate-950 p-6">

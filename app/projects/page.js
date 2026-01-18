@@ -4,7 +4,7 @@ import ProjectsExplorer from "./ProjectsExplorer";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PROJECTS_API = "https://workforcemangementtool.onrender.com/api/projects";
+const PROJECTS_API = process.env.NEXT_PROJECTS_API;
 
 async function fetchProjectsRaw() {
   const res = await fetch(PROJECTS_API, {
