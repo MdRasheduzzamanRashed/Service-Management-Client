@@ -1,0 +1,25 @@
+{
+  "name": "service-management-frontend-nav",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "next": "^14.2.33",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.0",
+    "typescript": "5.9.3"
+  }
+}
