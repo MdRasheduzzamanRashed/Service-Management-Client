@@ -1,11 +1,9 @@
 "use client";
 
 import { useContext, useEffect, useState } from "react";
-import axios from "axios";
 import { AuthContext } from "../../context/AuthContext";
 import { NotificationContext } from "../../context/NotificationContext";
-
-const API = "http://localhost:8000";
+import { apiGet } from "../../lib/api";
 
 export default function NotificationsPage() {
   const { user } = useContext(AuthContext);
@@ -19,7 +17,7 @@ export default function NotificationsPage() {
     async function load() {
       try {
         const token = user.token;
-        const res = await axios.get(API + "/notifications", {
+        const res = await apiGet("/notifications", {
           headers: {
             Authorization: token ? `Bearer ${token}` : undefined,
           },

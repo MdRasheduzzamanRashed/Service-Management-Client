@@ -10,11 +10,9 @@ import {
   useCallback,
   useMemo,
 } from "react";
-import axios from "axios";
 import OffersList from "../../../components/OffersList";
 import { AuthContext } from "../../../context/AuthContext";
-
-const API_BASE = "http://localhost:8000";
+import { apiDelete, apiGet, apiPost } from "../../../lib/api";
 
 // external system
 const EXTERNAL_INTERNAL_PROJECTS_BASE = "https://internal-projects.example.com";
@@ -61,7 +59,7 @@ export default function RequestDetailPage() {
     setLoading(true);
 
     try {
-      const res = await axios.get(`${API_BASE}/api/requests/${id}`, {
+      const res = await apiGet(`/requests/${id}`, {
         headers: authHeaders,
       });
       const data = res.data || null;
@@ -123,7 +121,7 @@ export default function RequestDetailPage() {
       setActionLoading(true);
 
       try {
-        await axios.post(`${API_BASE}${url}`, body, { headers: authHeaders });
+        await apiPost(url, body, { headers: authHeaders });
         await load();
         setOffersReloadKey((k) => k + 1);
         setActionMessage(successMessage || "Action completed.");
@@ -150,7 +148,7 @@ export default function RequestDetailPage() {
     setActionMessage("");
 
     try {
-      await axios.delete(`${API_BASE}/api/requests/${id}`, {
+      await apiDelete(`/requests/${id}`, {
         headers: authHeaders,
       });
 
@@ -301,7 +299,7 @@ export default function RequestDetailPage() {
               disabled={actionLoading}
               onClick={() =>
                 runAction({
-                  url: `/api/requests/${id}/submit`,
+                  url: `/requests/${id}/submit`,
                   body: {},
                   successMessage: "Submitted to Procurement for review.",
                 })
@@ -318,7 +316,7 @@ export default function RequestDetailPage() {
               disabled={actionLoading}
               onClick={() =>
                 runAction({
-                  url: `/api/requests/${id}/procurement-review`,
+                  url: `/requests/${id}/procurement-review`,
                   body: { approve: true, comments: "OK" },
                   successMessage:
                     "Procurement approved and submission window opened.",
@@ -338,7 +336,7 @@ export default function RequestDetailPage() {
               disabled={actionLoading}
               onClick={() =>
                 runAction({
-                  url: `/api/requests/${id}/close-window`,
+                  url: `/requests/${id}/close-window`,
                   body: {},
                   successMessage:
                     "Submission window closed. Ready for evaluation.",

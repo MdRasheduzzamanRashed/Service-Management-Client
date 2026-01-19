@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE = "http://localhost:8000";
+import { apiGet } from "../../lib/api";
 
 export default function ServiceOrdersPage() {
   const [orders, setOrders] = useState([]);
@@ -11,7 +9,7 @@ export default function ServiceOrdersPage() {
 
   async function load() {
     try {
-      const res = await axios.get(API_BASE + "/api/service-orders");
+      const res = await apiGet("/service-orders");
       setOrders(res.data);
     } catch (err) {
       setError(err?.response?.data?.error || "Error loading service orders");

@@ -1,12 +1,8 @@
 "use client";
 
 import { useContext, useState } from "react";
-import axios from "axios";
 import { AuthContext } from "../../context/AuthContext";
-
-const API =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+import { API_BASE, API_FALLBACK_BASE, apiPost } from "../../lib/api";
 
 export default function SettingsPage() {
   const { user } = useContext(AuthContext);
@@ -26,7 +22,7 @@ export default function SettingsPage() {
     setMsg("");
     setErrMsg("");
 
-    if (!API) {
+    if (!API_BASE && !API_FALLBACK_BASE) {
       setErrMsg(
         "API base URL missing. Set NEXT_PUBLIC_API_BASE in your environment variables.",
       );
@@ -45,8 +41,8 @@ export default function SettingsPage() {
 
     setLoading(true);
     try {
-      const res = await axios.post(
-        `${API}/api/auth/change-password`,
+      const res = await apiPost(
+        "/auth/change-password",
         {
           username: user.username, // ✅ login uses username
           oldPassword: form.oldPassword,

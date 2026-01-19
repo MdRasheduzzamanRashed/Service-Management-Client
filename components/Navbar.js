@@ -7,7 +7,7 @@ import { AuthContext } from "../context/AuthContext";
 import { NotificationContext } from "../context/NotificationContext";
 
 export default function Navbar() {
-  const { user, logoutUser } = useContext(AuthContext);
+  const { user, logoutUser, loading } = useContext(AuthContext);
   const { unreadCount } = useContext(NotificationContext);
 
   const pathname = usePathname();
@@ -78,14 +78,18 @@ export default function Navbar() {
 
         {/* MIDDLE */}
         <nav className="hidden md:flex items-center gap-2 text-xs">
-          {navItems.map((item) => (
-            <NavLink key={item.href} href={item.href} label={item.label} />
-          ))}
+          {!loading &&
+            navItems.map((item) => (
+              <NavLink key={item.href} href={item.href} label={item.label} />
+            ))}
+          {loading && (
+            <span className="text-[11px] text-slate-400">Loading...</span>
+          )}
         </nav>
 
         {/* RIGHT */}
         <div className="flex items-center gap-2">
-          {isLoggedIn && (
+          {!loading && isLoggedIn && (
             <>
               {/* Notifications */}
               <Link
@@ -126,6 +130,7 @@ export default function Navbar() {
           <button
             onClick={() => setMenuOpen((v) => !v)}
             className="md:hidden h-9 w-9 flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-200"
+            disabled={loading}
           >
             ☰
           </button>
@@ -133,7 +138,7 @@ export default function Navbar() {
       </div>
 
       {/* MOBILE MENU */}
-      {menuOpen && (
+      {menuOpen && !loading && (
         <div className="border-t border-slate-800 bg-slate-950 md:hidden">
           <div className="px-4 py-3 space-y-1">
             {navItems.map((item) => (

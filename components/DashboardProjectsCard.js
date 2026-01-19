@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 
-const PROJECTS_API = "https://workforcemangementtool.onrender.com/api/projects";
+const PROJECTS_API =
+  process.env.NEXT_PROJECTS_API ||
+  "https://workforcemangementtool.onrender.com/api/projects";
 
 export default function DashboardProjectsCard() {
   const router = useRouter();

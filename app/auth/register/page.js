@@ -1,17 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, useContext } from "react";
-import axios from "axios";
 import { useRouter } from "next/navigation";
 import { AuthContext } from "../../../context/AuthContext";
-
-const API =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+import { apiGet, apiPost } from "../../../lib/api";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { loginUser } = useContext(AuthContext);
+  const { user, loading: authLoading, loginUser } = useContext(AuthContext);
 
   const [form, setForm] = useState({ email: "", password: "" });
 
@@ -35,6 +31,11 @@ export default function RegisterPage() {
   });
 
   const lastPrefillEmailRef = useRef("");
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (user) router.replace("/dashboard");
+  }, [authLoading, user, router]);
 
   function openPopup({ title, message, actionText, actionHref }) {
     setPopup({
@@ -66,7 +67,7 @@ export default function RegisterPage() {
 
       setPrefillLoading(true);
       try {
-        const res = await axios.get(`${API}/api/auth/prefill`, {
+        const res = await apiGet("/auth/prefill", {
           params: { email },
         });
 
@@ -133,7 +134,7 @@ export default function RegisterPage() {
         });
       }
 
-      const res = await axios.post(`${API}/api/auth/register`, {
+      const res = await apiPost("/auth/register", {
         email,
         password: form.password,
       });

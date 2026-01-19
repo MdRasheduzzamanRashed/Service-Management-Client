@@ -43,11 +43,23 @@ async function fetchProjectsRaw() {
 }
 
 export default async function Projects() {
-  const projects = await fetchProjectsRaw();
+  let projects = [];
+  let error = "";
+
+  try {
+    projects = await fetchProjectsRaw();
+  } catch (err) {
+    error = err?.message || "Failed to load projects.";
+  }
 
   return (
     <main className="min-h-[calc(100vh-64px)] bg-slate-950 my-4">
       <div className="mx-auto max-w-7xl">
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-700/40 bg-red-950/40 px-4 py-2 text-xs text-red-300">
+            {error}
+          </div>
+        )}
         <ProjectsExplorer initialProjects={projects} />
       </div>
     </main>

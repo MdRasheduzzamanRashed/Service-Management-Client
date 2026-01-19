@@ -1,18 +1,14 @@
 "use client";
 
-import { useState, useContext, useMemo } from "react";
-import axios from "axios";
+import { useEffect, useState, useContext, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AuthContext } from "../../../context/AuthContext";
+import { API_BASE, API_FALLBACK_BASE, apiPost } from "../../../lib/api";
 
-// ✅ Use env in production (Vercel), fallback to localhost in dev
-const API =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 export default function LoginPage() {
   const router = useRouter();
-  const { loginUser } = useContext(AuthContext);
+  const { user, loading: authLoading, loginUser } = useContext(AuthContext);
 
   const [form, setForm] = useState({ username: "", password: "" });
   const [loading, setLoading] = useState(false);
@@ -25,6 +21,11 @@ export default function LoginPage() {
     actionText: "",
     actionHref: "",
   });
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (user) router.replace("/dashboard");
+  }, [authLoading, user, router]);
 
   function openPopup({ title, message, actionText, actionHref }) {
     setPopup({
@@ -49,7 +50,7 @@ export default function LoginPage() {
     setError("");
     closePopup();
 
-    if (!API) {
+    if (!API_BASE && !API_FALLBACK_BASE) {
       setError(
         "API URL is missing. Set NEXT_PUBLIC_API_BASE in Vercel environment variables.",
       );
@@ -65,7 +66,7 @@ export default function LoginPage() {
       };
 
       // ✅ Style 1 endpoint
-      const res = await axios.post(`${API}/api/auth/login`, payload, {
+      const res = await apiPost("/auth/login", payload, {
         headers: { "Content-Type": "application/json" },
         withCredentials: true, // safe even if you don't use cookies
       });

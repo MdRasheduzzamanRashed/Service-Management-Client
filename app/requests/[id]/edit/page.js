@@ -10,12 +10,10 @@ import {
 } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import axios from "axios";
 import { AuthContext } from "../../../../context/AuthContext";
+import { apiGet, apiPut } from "../../../../lib/api";
 // ✅ for app/requests/[id]/edit/page.js
 // If your file is deeper/shallower, adjust ../ count.
-
-const API_BASE = "http://localhost:8000";
 
 const emptyLang = { language: "English", level: "B2" };
 
@@ -239,13 +237,11 @@ export default function RequestEditPage() {
   useEffect(() => {
     if (!headersReady) return;
 
-    axios
-      .get(API_BASE + "/api/contracts", { headers: authHeaders })
+    apiGet("/contracts", { headers: authHeaders })
       .then((res) => setContracts(res.data || []))
       .catch(() => setContracts([]));
 
-    axios
-      .get(API_BASE + "/api/skills", { headers: authHeaders })
+    apiGet("/skills", { headers: authHeaders })
       .then((res) => {
         const docs = res.data || [];
         const all = new Set();
@@ -266,7 +262,7 @@ export default function RequestEditPage() {
     setError("");
 
     try {
-      const res = await axios.get(`${API_BASE}/api/requests/${id}`, {
+      const res = await apiGet(`/requests/${id}`, {
         headers: authHeaders,
       });
 
@@ -413,7 +409,7 @@ export default function RequestEditPage() {
         totalEmployees: Number(reqDoc.totalEmployees) || 1,
       };
 
-      await axios.put(`${API_BASE}/api/requests/${id}`, payload, {
+      await apiPut(`/requests/${id}`, payload, {
         headers: authHeaders,
       });
 

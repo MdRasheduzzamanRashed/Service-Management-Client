@@ -8,10 +8,8 @@ import {
   useContext,
   useMemo,
 } from "react";
-import axios from "axios";
 import { AuthContext } from "../context/AuthContext";
-
-const API_BASE = "http://localhost:8000";
+import { apiGet, apiPost } from "../lib/api";
 
 // ✅ external system (another team)
 const EXTERNAL_INTERNAL_PROJECTS_BASE = "https://internal-projects.example.com";
@@ -248,13 +246,11 @@ export default function ServiceRequestForm({ onCreated }) {
   useEffect(() => {
     if (authLoading) return;
 
-    axios
-      .get(API_BASE + "/api/contracts", { headers: authHeaders })
+    apiGet("/contracts", { headers: authHeaders })
       .then((res) => setContracts(res.data || []))
       .catch(() => setContracts([]));
 
-    axios
-      .get(API_BASE + "/api/skills", { headers: authHeaders })
+    apiGet("/skills", { headers: authHeaders })
       .then((res) => {
         const docs = res.data || [];
         const all = new Set();
@@ -366,7 +362,7 @@ export default function ServiceRequestForm({ onCreated }) {
     try {
       const final = buildFinalPayload(payload);
 
-      await axios.post(API_BASE + "/api/requests", final, {
+      await apiPost("/requests", final, {
         headers: authHeaders,
       });
 

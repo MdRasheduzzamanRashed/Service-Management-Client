@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useState, useContext, useMemo, useCallback } from "react";
-import axios from "axios";
 import Link from "next/link";
-import { AuthContext } from '../context/AuthContext';
-
-
-const API_BASE = "http://localhost:8000";
+import { AuthContext } from "../context/AuthContext";
+import { apiGet } from "../lib/api";
 
 export default function RequestList({ view = "pm" }) {
   const { user, authHeaders, loading: authLoading } = useContext(AuthContext);
@@ -41,7 +38,7 @@ export default function RequestList({ view = "pm" }) {
       if (view === "procurement") params.status = "in_review";
       if (view === "planner") params.status = "evaluating";
 
-      const res = await axios.get(API_BASE + "/api/requests", {
+      const res = await apiGet("/requests", {
         params,
         headers: authHeaders, // ✅ FIX
       });

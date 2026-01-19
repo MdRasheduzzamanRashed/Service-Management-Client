@@ -1,7 +1,5 @@
-"use client";
-
 import Projects from "../projects/page";
-import DashboardProjectsCard from '../../components/DashboardProjectsCard';
+import DashboardProjectsCard from "../../components/DashboardProjectsCard";
 
 export default function Dashboard() {
   return (

@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { AuthContext } from "./AuthContext";
 import { ToastContext } from "./ToastContext";
+import { API_BASE } from "../lib/api";
 
 export const NotificationContext = createContext({
   unreadCount: 0,
@@ -12,7 +13,7 @@ export const NotificationContext = createContext({
 });
 
 let socket = null;
-const API = "http://localhost:8000";
+const SOCKET_URL = API_BASE || "";
 
 export function NotificationProvider({ children }) {
   const { user } = useContext(AuthContext);
@@ -33,10 +34,12 @@ export function NotificationProvider({ children }) {
     }
 
     if (!socket) {
-      socket = io(API, {
+      const opts = {
         withCredentials: true,
-        transports: ["websocket", "polling"]
-      });
+        transports: ["websocket", "polling"],
+      };
+
+      socket = SOCKET_URL ? io(SOCKET_URL, opts) : io(opts);
     }
 
     socket.on("connect", () => {

@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE = "http://localhost:8000";
+import { apiGet } from "../lib/api";
 
 export default function OffersList({ requestId }) {
   const [offers, setOffers] = useState([]);
@@ -11,7 +9,7 @@ export default function OffersList({ requestId }) {
 
   async function load() {
     try {
-      const res = await axios.get(API_BASE + "/api/offers/" + requestId);
+      const res = await apiGet(`/offers/${requestId}`);
       setOffers(res.data);
     } catch (err) {
       setError(err?.response?.data?.error || "Error loading offers");
