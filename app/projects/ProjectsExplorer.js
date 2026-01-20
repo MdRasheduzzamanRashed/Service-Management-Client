@@ -1,413 +1,464 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import Link from "next/link";
+
+function toDateText(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
 
 function asArray(v) {
   if (!v) return [];
-  return Array.isArray(v) ? v : [v];
+  if (Array.isArray(v)) return v;
+  return [v];
 }
 
-function pick(obj, keys, fallback = "") {
-  for (const k of keys) {
-    const v = obj?.[k];
-    if (v === 0) return 0;
-    if (v === false) return false;
-    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+// XML -> object converter output varies. This makes sure we handle:
+// selectedSkills: { selectedSkills: ["Ethereum","Web3.js"] } OR ["Ethereum"] OR "Ethereum"
+function pickList(obj, key) {
+  const val = obj?.[key];
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === "object") {
+    const inner = val?.[key];
+    return asArray(inner).filter(Boolean);
   }
-  return fallback;
+  return [val].filter(Boolean);
 }
 
-function normalizeSkills(p) {
-  // sample: selectedSkills: { selectedSkills: ["Ethereum","Web3.js"] }
-  const root = p?.selectedSkills;
-  const items = root?.selectedSkills;
-  return asArray(items).filter(Boolean).map(String);
+function joinList(items, max = 3) {
+  const list = asArray(items).filter(Boolean).map(String);
+  if (list.length === 0) return "—";
+  const shown = list.slice(0, max);
+  const rest = list.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")} +${rest}` : shown.join(", ");
 }
 
-function normalizeLocations(p) {
-  const root = p?.selectedLocations;
-  const items = root?.selectedLocations;
-  return asArray(items).filter(Boolean).map(String);
-}
+function StatusBadge({ status, isPublished }) {
+  const s = String(status || "")
+    .trim()
+    .toLowerCase();
 
-function normalizeRoles(p) {
-  // sample: roles: { roles: [{ requiredRole, requiredCompetencies:{requiredCompetencies:[]}, capacity, numberOfEmployees ...}] }
-  const root = p?.roles;
-  const items = root?.roles;
-  return asArray(items).map((r) => ({
-    requiredRole: pick(r, ["requiredRole"], ""),
-    competencies: asArray(r?.requiredCompetencies?.requiredCompetencies)
-      .filter(Boolean)
-      .map(String),
-    capacity: pick(r, ["capacity"], ""),
-    numberOfEmployees: pick(r, ["numberOfEmployees"], ""),
-    roleInput: pick(r, ["roleInput"], ""),
-    competencyInput: pick(r, ["competencyInput"], ""),
-    showRoleDropdown: pick(r, ["showRoleDropdown"], ""),
-    showCompetencyDropdown: pick(r, ["showCompetencyDropdown"], ""),
-  }));
-}
+  const base =
+    "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border";
 
-function formatDate(d) {
-  if (!d) return "—";
-  return String(d);
-}
+  if (s === "active")
+    return (
+      <span
+        className={`${base} border-emerald-400/40 text-emerald-300 bg-emerald-500/10`}
+      >
+        Active
+      </span>
+    );
 
-function Badge({ children }) {
+  if (s === "expired")
+    return (
+      <span className={`${base} border-red-400/40 text-red-300 bg-red-500/10`}>
+        Expired
+      </span>
+    );
+
+  // If status empty, use publish state
+  if (s === "" || s === "—") {
+    return isPublished ? (
+      <span
+        className={`${base} border-emerald-400/40 text-emerald-300 bg-emerald-500/10`}
+      >
+        Published
+      </span>
+    ) : (
+      <span
+        className={`${base} border-yellow-400/40 text-yellow-300 bg-yellow-500/10`}
+      >
+        Draft
+      </span>
+    );
+  }
+
   return (
-    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-200">
-      {children}
+    <span
+      className={`${base} border-slate-500/40 text-slate-300 bg-slate-500/10`}
+    >
+      {status || "Unknown"}
     </span>
   );
 }
 
-function Chip({ children }) {
+function Field({ label, children }) {
   return (
-    <span className="inline-flex items-center rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 text-[11px] text-emerald-200">
-      {children}
-    </span>
+    <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 text-sm text-slate-100 break-words">{children}</div>
+    </div>
+  );
+}
+
+// ✅ Show ONLY role names (requiredRole) — not full role objects
+function RolesChips({ roles }) {
+  // roles can be: { roles: { requiredRole: ... } } OR { roles: [ ... ] } OR array
+  const root = roles?.roles ?? roles;
+  const items = Array.isArray(root) ? root : root ? [root] : [];
+
+  const names = items
+    .map((r) => r?.requiredRole || r?.role || r?.name)
+    .filter(Boolean)
+    .map(String);
+
+  if (names.length === 0) return <span className="text-slate-400">—</span>;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {names.map((n, i) => (
+        <span
+          key={`${n}-${i}`}
+          className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+        >
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ProjectModal({ open, onClose, project }) {
+  useEffect(() => {
+    if (!open) return;
+
+    function onKeyDown(e) {
+      if (e.key === "Escape") onClose();
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+
+  if (!open || !project) return null;
+
+  const skills = pickList(project, "selectedSkills");
+  const locations = pickList(project, "selectedLocations");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="absolute inset-0 bg-black/60" />
+
+      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-800 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">
+              Project Details
+            </h2>
+            <div className="mt-1 text-xs text-slate-400">
+              ID: <span className="text-slate-300">{project?.id || "—"}</span>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="max-h-[75vh] overflow-y-auto px-5 py-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* Main fields */}
+            <Field label="Project ID">{project?.projectId || "—"}</Field>
+            <Field label="Status">
+              <StatusBadge
+                status={project?.status}
+                isPublished={project?.isPublished}
+              />
+            </Field>
+            <Field label="Start">{toDateText(project?.projectStart)}</Field>
+            <Field label="End">{toDateText(project?.projectEnd)}</Field>
+
+            <div className="sm:col-span-2">
+              <Field label="Project Description">
+                <div className="whitespace-pre-wrap">
+                  {project?.projectDescription || "—"}
+                </div>
+              </Field>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Field label="Task Description">
+                <div className="whitespace-pre-wrap">
+                  {project?.taskDescription || "—"}
+                </div>
+              </Field>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Field label="Link">
+                {project?.links ? (
+                  <a
+                    className="text-emerald-300 hover:underline break-all"
+                    href={project.links}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {project.links}
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </Field>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Field label="Selected Skills">{joinList(skills, 999)}</Field>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Field label="Selected Locations">
+                {joinList(locations, 999)}
+              </Field>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Field label="Roles">
+                <RolesChips roles={project?.roles} />
+              </Field>
+            </div>
+
+            {/* Other useful meta */}
+            <Field label="External Search">
+              {String(!!project?.isExternalSearch)}
+            </Field>
+            <Field label="Published">{String(!!project?.isPublished)}</Field>
+            <Field label="Created At">{toDateText(project?.createdAt)}</Field>
+            <Field label="Updated At">{toDateText(project?.updatedAt)}</Field>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-800 px-5 py-4">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-slate-700 bg-slate-950/30 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
 export default function ProjectsExplorer({ initialProjects = [] }) {
-  const [q, setQ] = useState("");
-  const [activeId, setActiveId] = useState(null);
+  const [projects] = useState(initialProjects);
 
-  // pick first project by default
-  useEffect(() => {
-    if (!activeId && initialProjects.length > 0) {
-      const first = initialProjects[0];
-      const id = pick(first, ["id", "_id"], null);
-      setActiveId(id);
-    }
-  }, [activeId, initialProjects]);
+  const [tab, setTab] = useState("all"); // all | published | draft
+  const [q, setQ] = useState("");
+
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(null);
+
+  const counts = useMemo(() => {
+    const published = projects.filter(
+      (p) => p?.isPublished === true || String(p?.isPublished) === "true",
+    ).length;
+    const draft = projects.length - published;
+    return { all: projects.length, published, draft };
+  }, [projects]);
 
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return initialProjects;
+    const needle = q.trim().toLowerCase();
 
-    return initialProjects.filter((p) => {
-      const hay = [
-        pick(p, ["projectId", "id", "_id"]),
-        pick(p, ["projectDescription"]),
-        pick(p, ["taskDescription"]),
-        pick(p, ["links"]),
-        ...normalizeSkills(p),
-        ...normalizeLocations(p),
-      ]
-        .map((x) => String(x || "").toLowerCase())
-        .join(" | ");
+    return projects
+      .filter((p) => {
+        if (tab === "published")
+          return p?.isPublished === true || String(p?.isPublished) === "true";
+        if (tab === "draft")
+          return !(
+            p?.isPublished === true || String(p?.isPublished) === "true"
+          );
+        return true;
+      })
+      .filter((p) => {
+        if (!needle) return true;
 
-      return hay.includes(query);
-    });
-  }, [q, initialProjects]);
+        // Search only main fields + skills/locations text
+        const skills = joinList(pickList(p, "selectedSkills"), 999);
+        const locations = joinList(pickList(p, "selectedLocations"), 999);
 
-  const active = useMemo(() => {
-    if (!activeId) return null;
-    return (
-      initialProjects.find((p) => pick(p, ["id", "_id"], "") === activeId) ||
-      filtered.find((p) => pick(p, ["id", "_id"], "") === activeId) ||
-      null
-    );
-  }, [activeId, initialProjects, filtered]);
+        const hay = [
+          p?.projectId,
+          p?.projectDescription,
+          p?.projectStart,
+          p?.projectEnd,
+          p?.taskDescription,
+          p?.status,
+          p?.links,
+          skills,
+          locations,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
 
-  const activeSkills = active ? normalizeSkills(active) : [];
-  const activeLocations = active ? normalizeLocations(active) : [];
-  const activeRoles = active ? normalizeRoles(active) : [];
+        return hay.includes(needle);
+      });
+  }, [projects, tab, q]);
+
+  function openModal(p) {
+    setSelected(p);
+    setOpen(true);
+  }
+
+  function closeModal() {
+    setOpen(false);
+    setSelected(null);
+  }
 
   return (
-    <section className="grid grid-cols-4 gap-4">
-      {/* LEFT LIST */}
-      <aside className="rounded-2xl border border-slate-800 bg-slate-900">
-        <div className="p-4 border-b border-slate-800">
-          <h1 className="text-lg font-semibold text-slate-100">Projects</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            {filtered.length} project{filtered.length === 1 ? "" : "s"}
-          </p>
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="mx-auto max-w-7xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">Projects</h1>
+            <p className="mt-1 text-sm text-slate-400">
+              Click a row to open full project details.
+            </p>
+          </div>
 
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search projectId, description, skills..."
-            className="mt-3 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-400"
-          />
+          <Link
+            href="/dashboard"
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+          >
+            ← Back
+          </Link>
         </div>
 
-        <div className="max-h-[70vh] overflow-auto">
+        {/* Tabs + Search (same style as contracts) */}
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            {[
+              ["all", "All"],
+              ["published", "Published"],
+              ["draft", "Draft"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`rounded-lg px-3 py-2 text-sm border transition ${
+                  tab === key
+                    ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-200"
+                    : "border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                {label}{" "}
+                <span className="ml-1 text-slate-400">({counts[key]})</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="w-full sm:w-96">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search projectId, description, skills, locations..."
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400/60"
+            />
+          </div>
+        </div>
+
+        {/* Table (MAIN data only) */}
+        <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40">
           {filtered.length === 0 ? (
-            <div className="p-4 text-sm text-slate-300">No projects found.</div>
+            <div className="p-5 text-sm text-slate-300">No projects found.</div>
           ) : (
-            filtered.map((p) => {
-              const id = pick(p, ["id", "_id"], "");
-              const projectId = pick(p, ["projectId"], "—");
-              const desc = pick(p, ["projectDescription"], "No description");
-              const start = pick(p, ["projectStart"], "");
-              const end = pick(p, ["projectEnd"], "");
-              const published = !!pick(p, ["isPublished"], false);
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-slate-300">
+                  <tr className="border-b border-slate-800">
+                    <th className="px-4 py-3">Project ID</th>
+                    <th className="px-4 py-3">Project Description</th>
+                    <th className="px-4 py-3">Start</th>
+                    <th className="px-4 py-3">End</th>
+                    <th className="px-4 py-3">Locations</th>
+                    <th className="px-4 py-3">Skills</th>
+                    <th className="px-4 py-3">Status</th>
+                  </tr>
+                </thead>
 
-              const isActive = id === activeId;
+                <tbody>
+                  {filtered.map((p) => {
+                    const skills = pickList(p, "selectedSkills");
+                    const locations = pickList(p, "selectedLocations");
 
-              return (
-                <button
-                  key={id}
-                  onClick={() => setActiveId(id)}
-                  className={[
-                    "w-full text-left p-4 border-b border-slate-800 hover:bg-slate-950/40 transition",
-                    isActive ? "bg-slate-950/50" : "",
-                  ].join(" ")}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-100">
-                        {projectId}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-400 line-clamp-2">
-                        {desc}
-                      </p>
-                    </div>
-                    <span
-                      className={[
-                        "shrink-0 rounded-full px-2 py-1 text-[10px] border",
-                        published
-                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
-                          : "bg-slate-800 border-slate-700 text-slate-300",
-                      ].join(" ")}
-                    >
-                      {published ? "Published" : "Draft"}
-                    </span>
-                  </div>
+                    return (
+                      <tr
+                        key={p?.id || p?.projectId}
+                        onClick={() => openModal(p)}
+                        className="cursor-pointer border-b border-slate-800/70 hover:bg-slate-800/40 transition"
+                        title="Click to view"
+                      >
+                        <td className="px-4 py-3 font-medium text-slate-100">
+                          {p?.projectId || "—"}
+                        </td>
 
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {start ? <Badge>Start: {formatDate(start)}</Badge> : null}
-                    {end ? <Badge>End: {formatDate(end)}</Badge> : null}
-                  </div>
-                </button>
-              );
-            })
+                        <td className="px-4 py-3 text-slate-300">
+                          <div className="max-w-md truncate">
+                            {p?.projectDescription || "—"}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-300">
+                          {toDateText(p?.projectStart)}
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-300">
+                          {toDateText(p?.projectEnd)}
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-300">
+                          {joinList(locations)}
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-300">
+                          {joinList(skills)}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            status={p?.status}
+                            isPublished={p?.isPublished}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-      </aside>
 
-      {/* RIGHT DETAILS */}
-      <div className="col-span-3 rounded-2xl border border-slate-800 bg-slate-900">
-        {!active ? (
-          <div className="p-6 text-slate-200">Select a project to view.</div>
-        ) : (
-          <div className="p-6 space-y-5">
-            {/* Header */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="text-xl font-semibold text-slate-100">
-                  {pick(active, ["projectId"], "Project")}
-                </h2>
-                <p className="mt-1 text-sm text-slate-300">
-                  {pick(active, ["projectDescription"], "—")}
-                </p>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge>ID: {pick(active, ["id", "_id"], "—")}</Badge>
-                  {pick(active, ["status"], "") ? (
-                    <Badge>Status: {pick(active, ["status"], "")}</Badge>
-                  ) : null}
-                  <Badge>
-                    Published: {String(!!pick(active, ["isPublished"], false))}
-                  </Badge>
-                  <Badge>
-                    External Search:{" "}
-                    {String(!!pick(active, ["isExternalSearch"], false))}
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Link */}
-              {pick(active, ["links"], "") ? (
-                <a
-                  href={pick(active, ["links"], "")}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-black hover:bg-emerald-400"
-                >
-                  Open Project Link
-                </a>
-              ) : null}
-            </div>
-
-            {/* Timeline + Task */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card title="Timeline">
-                <div className="grid grid-cols-2 gap-3">
-                  <KV
-                    label="Project Start"
-                    value={formatDate(pick(active, ["projectStart"], ""))}
-                  />
-                  <KV
-                    label="Project End"
-                    value={formatDate(pick(active, ["projectEnd"], ""))}
-                  />
-                  <KV
-                    label="Created At"
-                    value={formatDate(pick(active, ["createdAt"], ""))}
-                  />
-                  <KV
-                    label="Updated At"
-                    value={formatDate(pick(active, ["updatedAt"], ""))}
-                  />
-                </div>
-              </Card>
-
-              <Card title="Task Description">
-                <p className="text-sm text-slate-200 whitespace-pre-wrap">
-                  {pick(active, ["taskDescription"], "—")}
-                </p>
-              </Card>
-            </div>
-
-            {/* Skills & Locations */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card title={`Selected Skills (${activeSkills.length})`}>
-                {activeSkills.length === 0 ? (
-                  <EmptyLine text="No skills selected." />
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {activeSkills.map((s, i) => (
-                      <Chip key={i}>{s}</Chip>
-                    ))}
-                  </div>
-                )}
-              </Card>
-
-              <Card title={`Selected Locations (${activeLocations.length})`}>
-                {activeLocations.length === 0 ? (
-                  <EmptyLine text="No locations selected." />
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {activeLocations.map((l, i) => (
-                      <Chip key={i}>{l}</Chip>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            </div>
-
-            {/* Roles */}
-            <Card title={`Roles (${activeRoles.length})`}>
-              {activeRoles.length === 0 ? (
-                <EmptyLine text="No roles found." />
-              ) : (
-                <div className="space-y-3">
-                  {activeRoles.map((r, idx) => (
-                    <details
-                      key={idx}
-                      className="rounded-xl border border-slate-800 bg-slate-950/30 p-3"
-                    >
-                      <summary className="cursor-pointer list-none">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-100">
-                              {r.requiredRole || `Role #${idx + 1}`}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-400">
-                              Capacity: {r.capacity || "—"} · Employees:{" "}
-                              {r.numberOfEmployees || "—"}
-                            </p>
-                          </div>
-                          <span className="text-[11px] text-emerald-300">
-                            Expand
-                          </span>
-                        </div>
-                      </summary>
-
-                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                        <div>
-                          <p className="text-[11px] text-slate-500">
-                            Required Competencies
-                          </p>
-                          {r.competencies.length === 0 ? (
-                            <p className="text-sm text-slate-200 mt-1">—</p>
-                          ) : (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {r.competencies.map((c, i) => (
-                                <Chip key={i}>{c}</Chip>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <KV
-                            label="showRoleDropdown"
-                            value={String(r.showRoleDropdown)}
-                          />
-                          <KV
-                            label="showCompetencyDropdown"
-                            value={String(r.showCompetencyDropdown)}
-                          />
-                          <KV label="roleInput" value={r.roleInput || "—"} />
-                          <KV
-                            label="competencyInput"
-                            value={r.competencyInput || "—"}
-                          />
-                        </div>
-                      </div>
-                    </details>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            {/* Meta */}
-            <Card title="Meta / Audit">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <KV
-                  label="createdBy"
-                  value={pick(active, ["createdBy"], "—")}
-                />
-                <KV
-                  label="updatedBy"
-                  value={pick(active, ["updatedBy"], "—")}
-                />
-                <KV
-                  label="requiredEmployees"
-                  value={pick(active, ["requiredEmployees"], "—")}
-                />
-              </div>
-
-              <details className="mt-4">
-                <summary className="cursor-pointer text-xs text-emerald-300 hover:underline">
-                  View raw project JSON
-                </summary>
-                <pre className="mt-2 max-h-72 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-[11px] text-slate-200">
-                  {JSON.stringify(active, null, 2)}
-                </pre>
-              </details>
-            </Card>
-          </div>
-        )}
+        <ProjectModal open={open} onClose={closeModal} project={selected} />
       </div>
-    </section>
-  );
-}
-
-function Card({ title, children }) {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
-      </div>
-      <div className="mt-3">{children}</div>
     </div>
   );
-}
-
-function KV({ label, value }) {
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3">
-      <p className="text-[11px] text-slate-500">{label}</p>
-      <p className="mt-1 text-sm text-slate-200 break-words">{value || "—"}</p>
-    </div>
-  );
-}
-
-function EmptyLine({ text }) {
-  return <p className="text-sm text-slate-300">{text}</p>;
 }

@@ -2,63 +2,52 @@
 
 import {
   createContext,
+  useCallback,
   useEffect,
   useMemo,
   useState,
-  useCallback,
 } from "react";
 
 export const AuthContext = createContext(null);
+
+function normalizeId(raw) {
+  if (!raw) return null;
+  if (typeof raw === "string") return raw;
+  if (raw?.$oid) return String(raw.$oid);
+  try {
+    return String(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** IMPORTANT: match backend role normalize */
+function normalizeRole(raw) {
+  return String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ stable id normalize
-  const normalizeId = useCallback((raw) => {
-    if (!raw) return null;
-    if (typeof raw === "string") return raw;
-    if (raw?.$oid) return String(raw.$oid);
-    try {
-      return String(raw);
-    } catch {
-      return null;
-    }
+  const normalizeUser = useCallback((u) => {
+    if (!u || typeof u !== "object") return null;
+
+    const _id = normalizeId(u._id || u.id || u.userId);
+    const role = normalizeRole(u.role || u.userRole);
+
+    const token = u.token || u.accessToken || u.jwt || null;
+    const username = u.username || null;
+    const displayUsername = u.displayUsername || u.display_name || null;
+
+    return { ...u, _id, role, token, username, displayUsername };
   }, []);
 
-  // ✅ normalize user payload (supports server variations)
-  const normalizeUser = useCallback(
-    (u) => {
-      if (!u || typeof u !== "object") return null;
-
-      const _id = normalizeId(u._id || u.id || u.userId);
-      const role = u.role || u.userRole || null;
-
-      // token name variations
-      const token = u.token || u.accessToken || u.jwt || null;
-
-      // IMPORTANT:
-      // - username should be the login username (normalized in DB)
-      // - displayUsername can be shown in UI only
-      const username = u.username || null;
-      const displayUsername = u.displayUsername || u.display_name || null;
-
-      return {
-        ...u,
-        _id,
-        role,
-        token,
-        username,
-        displayUsername,
-      };
-    },
-    [normalizeId]
-  );
-
-  // ✅ load from localStorage once
   useEffect(() => {
     if (typeof window === "undefined") return;
-
     try {
       const saved = window.localStorage.getItem("user");
       setUser(saved ? normalizeUser(JSON.parse(saved)) : null);
@@ -69,51 +58,33 @@ export function AuthProvider({ children }) {
     }
   }, [normalizeUser]);
 
-  // ✅ login
   const loginUser = useCallback(
     (data) => {
       if (typeof window === "undefined") return;
-
       const normalized = normalizeUser(data);
-
-      // recommended strict validation
-      if (!normalized?.token || !normalized?._id || !normalized?.role) {
-        console.warn("loginUser(): missing token/_id/role", normalized);
-      }
 
       window.localStorage.setItem("user", JSON.stringify(normalized));
       setUser(normalized);
     },
-    [normalizeUser]
+    [normalizeUser],
   );
 
-  // ✅ logout
   const logoutUser = useCallback(() => {
     if (typeof window === "undefined") return;
-
     window.localStorage.removeItem("user");
     setUser(null);
     window.location.assign("/auth/login");
   }, []);
 
-  // ✅ axios headers
   const authHeaders = useMemo(() => {
-    if (!user?.token) return {};
-
-    const headers = {
-      Authorization: `Bearer ${user.token}`,
-    };
-
-    if (user?._id) headers["x-user-id"] = String(user._id);
-    if (user?.role) headers["x-user-role"] = String(user.role);
-
-    // use real username, not displayUsername
+    const headers = {};
+    if (user?.token) headers.Authorization = `Bearer ${user.token}`;
+    if (user?.role) headers["x-user-role"] = normalizeRole(user.role);
     if (user?.username) headers["x-username"] = String(user.username);
-
     return headers;
   }, [user]);
 
-  const isLoggedIn = !!user?.token;
+  const isLoggedIn = !!(user?.token || user?.role);
 
   return (
     <AuthContext.Provider

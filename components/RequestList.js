@@ -5,6 +5,13 @@ import Link from "next/link";
 import { AuthContext } from "../context/AuthContext";
 import { apiGet } from "../lib/api";
 
+function normalizeRole(raw) {
+  return String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+}
+
 export default function RequestList({ view = "pm" }) {
   const { user, authHeaders, loading: authLoading } = useContext(AuthContext);
 
@@ -12,18 +19,18 @@ export default function RequestList({ view = "pm" }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const canSeeList = useMemo(() => {
-    const role = user?.role;
-    return (
-      role === "ProjectManager" ||
-      role === "ProcurementOfficer" ||
-      role === "ResourcePlanner" ||
-      role === "System"
-    );
-  }, [user]);
+  const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
 
-  const headersReady =
-    !!authHeaders?.["x-user-id"] && !!authHeaders?.["x-user-role"];
+  const canSeeList = useMemo(() => {
+    return (
+      role === "PROJECT_MANAGER" ||
+      role === "PROCUREMENT_OFFICER" ||
+      role === "RESOURCE_PLANNER" ||
+      role === "SYSTEM_ADMIN"
+    );
+  }, [role]);
+
+  const headersReady = !!authHeaders?.["x-user-role"];
 
   const load = useCallback(async () => {
     if (!canSeeList) return;
@@ -33,20 +40,27 @@ export default function RequestList({ view = "pm" }) {
       setError("");
       setLoading(true);
 
-      // ✅ If you want filtering by view, keep it:
       const params = {};
-      if (view === "procurement") params.status = "in_review";
-      if (view === "planner") params.status = "evaluating";
+      if (view === "procurement") params.status = "IN_REVIEW";
+      if (view === "planner") params.status = "EVALUATING";
 
       const res = await apiGet("/requests", {
         params,
-        headers: authHeaders, // ✅ FIX
+        headers: authHeaders,
       });
 
-      setRequests(res.data || []);
+      const list = Array.isArray(res?.data)
+        ? res.data
+        : Array.isArray(res)
+          ? res
+          : [];
+
+      setRequests(list);
     } catch (err) {
       setRequests([]);
-      setError(err?.response?.data?.error || "Error loading requests");
+      setError(
+        err?.response?.data?.error || err?.message || "Error loading requests",
+      );
     } finally {
       setLoading(false);
     }
@@ -69,6 +83,10 @@ export default function RequestList({ view = "pm" }) {
     return (
       <div className="p-4">
         <p className="text-xs text-red-400">Not allowed to view requests.</p>
+        <p className="mt-1 text-[11px] text-slate-400">
+          Your role:{" "}
+          <span className="text-slate-200">{String(user?.role || "-")}</span>
+        </p>
       </div>
     );
   }
@@ -77,7 +95,7 @@ export default function RequestList({ view = "pm" }) {
     return (
       <div className="p-4">
         <p className="text-xs text-amber-300">
-          Missing auth headers. Please login again.
+          Missing auth header x-user-role. Please logout/login again.
         </p>
       </div>
     );
@@ -90,8 +108,8 @@ export default function RequestList({ view = "pm" }) {
           {view === "pm"
             ? "All Service Requests"
             : view === "procurement"
-            ? "Requests in Review"
-            : "Requests in Evaluation"}
+              ? "Requests in Review"
+              : "Requests in Evaluation"}
         </h2>
 
         <button
@@ -114,17 +132,11 @@ export default function RequestList({ view = "pm" }) {
             className="block rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm hover:border-emerald-400 hover:bg-slate-900 transition"
           >
             <div className="flex items-center justify-between">
-              <span className="font-medium">{r.title}</span>
+              <span className="font-medium">{r.title || "Untitled"}</span>
               <span className="text-[11px] px-2 py-1 rounded-full bg-slate-800 border border-slate-700">
-                {r.status}
+                {r.status || "—"}
               </span>
             </div>
-
-            {r.submissionWindowOpen && (
-              <p className="text-[11px] text-emerald-300 mt-1">
-                Supplier submission window is open
-              </p>
-            )}
           </Link>
         ))}
 

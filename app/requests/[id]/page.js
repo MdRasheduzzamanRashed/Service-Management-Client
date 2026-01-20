@@ -105,7 +105,7 @@ export default function RequestDetailPage() {
     }
 
     return `${EXTERNAL_INTERNAL_PROJECTS_BASE}/search?query=${encodeURIComponent(
-      req.title || ""
+      req.title || "",
     )}`;
   }, [req]);
 
@@ -132,7 +132,7 @@ export default function RequestDetailPage() {
         actionLockRef.current = false;
       }
     },
-    [id, headersReady, authHeaders, load]
+    [id, headersReady, authHeaders, load],
   );
 
   const handleDelete = useCallback(async () => {

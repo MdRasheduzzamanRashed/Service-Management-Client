@@ -176,8 +176,8 @@ function MultiSelect({
                   (disabled
                     ? "text-slate-500 cursor-not-allowed"
                     : selectedItem
-                    ? "bg-emerald-500/20 text-emerald-200"
-                    : "hover:bg-slate-800 text-slate-200")
+                      ? "bg-emerald-500/20 text-emerald-200"
+                      : "hover:bg-slate-800 text-slate-200")
                 }
               >
                 <span
@@ -201,12 +201,12 @@ function MultiSelect({
 function buildFinalPayload(payload) {
   const sumOfManDays = payload.positions.reduce(
     (t, p) => t + (Number(p.manDays) || 0) * (Number(p.employeesCount) || 1),
-    0
+    0,
   );
 
   const totalEmployees = payload.positions.reduce(
     (t, p) => t + (Number(p.employeesCount) || 1),
-    0
+    0,
   );
 
   const base = { ...payload, sumOfManDays, totalEmployees };
@@ -295,7 +295,7 @@ export default function ServiceRequestForm({ onCreated }) {
         newPositions = [createPosition(subs[0] || "")];
       } else if (prev.requestType === "Team") {
         newPositions = prev.positions.filter((p) =>
-          subs.includes(p.subContract)
+          subs.includes(p.subContract),
         );
         if (newPositions.length === 0 && subs.length) {
           newPositions = [createPosition(subs[0])];
@@ -348,7 +348,7 @@ export default function ServiceRequestForm({ onCreated }) {
 
     if (!headersReady) {
       setError(
-        "Missing auth headers (x-user-id / x-user-role). Please login again."
+        "Missing auth headers (x-user-id / x-user-role). Please login again.",
       );
       return;
     }

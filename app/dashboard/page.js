@@ -1,5 +1,6 @@
 import Projects from "../projects/page";
 import DashboardProjectsCard from "../../components/DashboardProjectsCard";
+import DashboardContractsCard from '../../components/DashboardContractsCard';
 
 export default function Dashboard() {
   return (
@@ -12,9 +13,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-4 gap-3">
           
           <DashboardProjectsCard></DashboardProjectsCard>
-          <div className="bg-slate-700 rounded p-4">
-            <h3>Contracts</h3> <h2>30</h2>
-          </div>
+          <DashboardContractsCard></DashboardContractsCard>
           <div className="bg-slate-700 rounded p-4">
             <h3>My Service Requests</h3> <h2>30</h2>
           </div>

@@ -149,8 +149,8 @@ function MultiSelect({
                   (disabled
                     ? "text-slate-500 cursor-not-allowed"
                     : selectedItem
-                    ? "bg-emerald-500/20 text-emerald-200"
-                    : "hover:bg-slate-800 text-slate-200")
+                      ? "bg-emerald-500/20 text-emerald-200"
+                      : "hover:bg-slate-800 text-slate-200")
                 }
               >
                 <span

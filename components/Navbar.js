@@ -36,7 +36,7 @@ export default function Navbar() {
       ? [
           { href: "/dashboard", label: "Dashboard" },
           { href: "/projects", label: "Projects" }, // ✅ ADDED
-          { href: "/contact", label: "Contact" },
+          { href: "/contracts", label: "Contracts" },
           { href: "/requests?view=my", label: "My Requests" },
           { href: "/requests", label: "All Requests" },
         ]
@@ -44,7 +44,7 @@ export default function Navbar() {
       ? [
           { href: "/dashboard", label: "Dashboard" },
           { href: "/projects", label: "Projects" }, // ✅ ADDED
-          { href: "/contact", label: "Contact" },
+          { href: "/contracts", label: "Contracts" },
           { href: "/requests", label: "All Requests" },
         ]
       : []
