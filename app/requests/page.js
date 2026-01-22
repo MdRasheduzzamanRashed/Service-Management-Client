@@ -1,15 +1,35 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AuthContext } from "../../context/AuthContext";
 import ServiceRequestForm from "../../components/ServiceRequestForm";
 import RequestList from "../../components/RequestList";
 
+function normalizeRole(raw) {
+  return String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+}
+
 export default function RequestsPage() {
   const { user, loading } = useContext(AuthContext);
+  const sp = useSearchParams();
 
   const [showForm, setShowForm] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+
+  const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
+  const isPM = role === "PROJECT_MANAGER";
+
+  const viewParam = (sp.get("view") || "").toLowerCase();
+
+  const listView = useMemo(() => {
+    if (isPM && viewParam === "my") return "my";
+    if (viewParam === "review") return "review"; // optional for RP view
+    return "all";
+  }, [isPM, viewParam]);
 
   if (loading) return <div className="p-6 text-slate-300">Loading...</div>;
 
@@ -25,13 +45,22 @@ export default function RequestsPage() {
     );
   }
 
-  const isPM = user?.role === "PROJECT_MANAGER";
-
   return (
     <main className="space-y-5">
-      {/* ✅ Only PM can see Create button */}
+      {/* Top bar */}
       {isPM && !showForm && (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm text-slate-300">
+            Showing:{" "}
+            <span className="text-slate-100 font-semibold">
+              {listView === "my"
+                ? "My Requests"
+                : listView === "review"
+                  ? "Review Queue"
+                  : "All Requests"}
+            </span>
+          </div>
+
           <button
             type="button"
             onClick={() => setShowForm(true)}
@@ -42,18 +71,19 @@ export default function RequestsPage() {
         </div>
       )}
 
-      {/* ✅ Form only for PM */}
+      {/* Create form */}
       {isPM && showForm && (
         <ServiceRequestForm
           onCreated={() => {
-            setReloadToken((t) => t + 1); // refresh list
-            setShowForm(false); // close form
+            setReloadToken((t) => t + 1);
+            setShowForm(false);
           }}
+          onCancel={() => setShowForm(false)}
         />
       )}
 
-      {/* ✅ List for PM/PO/RP/System (backend already filters) */}
-      <RequestList key={reloadToken} />
+      {/* List */}
+      <RequestList key={`${reloadToken}-${listView}`} view={listView} />
     </main>
   );
 }

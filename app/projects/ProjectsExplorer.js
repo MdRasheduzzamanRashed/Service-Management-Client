@@ -338,18 +338,11 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
       <div className="mx-auto max-w-7xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Projects</h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Click a row to open full project details.
-            </p>
+            <h1 className="text-xl font-bold">All Projects</h1>
+            
           </div>
 
-          <Link
-            href="/dashboard"
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
-          >
-            ← Back
-          </Link>
+          
         </div>
 
         {/* Tabs + Search (same style as contracts) */}

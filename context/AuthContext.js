@@ -1,3 +1,4 @@
+// context/AuthContext.jsx
 "use client";
 
 import {
@@ -21,7 +22,6 @@ function normalizeId(raw) {
   }
 }
 
-/** IMPORTANT: match backend role normalize */
 function normalizeRole(raw) {
   return String(raw || "")
     .trim()
@@ -33,8 +33,14 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const normalizeUser = useCallback((u) => {
-    if (!u || typeof u !== "object") return null;
+  const normalizeUser = useCallback((payload) => {
+    if (!payload || typeof payload !== "object") return null;
+
+    // ✅ IMPORTANT: accept {token, user:{...}} OR {...user, token}
+    const u =
+      payload.user && typeof payload.user === "object"
+        ? { ...payload.user, token: payload.token || payload.user.token }
+        : payload;
 
     const _id = normalizeId(u._id || u.id || u.userId);
     const role = normalizeRole(u.role || u.userRole);
@@ -62,7 +68,6 @@ export function AuthProvider({ children }) {
     (data) => {
       if (typeof window === "undefined") return;
       const normalized = normalizeUser(data);
-
       window.localStorage.setItem("user", JSON.stringify(normalized));
       setUser(normalized);
     },

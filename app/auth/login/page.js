@@ -68,7 +68,6 @@ export default function LoginPage() {
       // ✅ Style 1 endpoint
       const res = await apiPost("/auth/login", payload, {
         headers: { "Content-Type": "application/json" },
-        withCredentials: true, // safe even if you don't use cookies
       });
 
       const rawUser = res.data?.user || {};
