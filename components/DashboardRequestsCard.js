@@ -1,7 +1,6 @@
 "use client";
 
 import { useContext, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import toast from "react-hot-toast";
 import { AuthContext } from "../context/AuthContext";
 import { apiGet } from "../lib/api";
@@ -130,7 +129,13 @@ export default function DashboardRequestsCard({ variant = "all" }) {
   if (!allowed) return null;
 
   return (
-    <Link href={href} className="group relative block">
+    <div
+      className="relative z-10 overflow-visible group w-full max-w-sm cursor-pointer"
+      onClick={() => router.push(href)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && router.push(href)}
+    >
       {/* MAIN CARD */}
       <div className="rounded-xl border border-emerald-500/40 bg-slate-900/60 p-3 text-center transition hover:border-emerald-400">
         <div className="text-lg font-semibold text-slate-200">{title}</div>
@@ -166,6 +171,6 @@ export default function DashboardRequestsCard({ variant = "all" }) {
           </div>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }

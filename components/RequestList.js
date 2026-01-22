@@ -68,7 +68,7 @@ function StatusBadge({ status }) {
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] border ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] justify-center border ${cls}`}
     >
       {s || "—"}
     </span>
@@ -235,7 +235,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
+      <div className="w-full rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
@@ -385,7 +385,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                     <td className="px-3 py-2 text-right">
                       {canRecommend ? (
                         <button
-                          className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
+                          className="p-1 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
                           onClick={() => recommend(oid)}
                           disabled={!oid || requestStatus !== "BID_EVALUATION"}
                           title="RP: Recommend this offer"
@@ -561,13 +561,13 @@ export default function RequestList({ view = "all" }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search title, project, supplier, createdBy..."
-            className="w-full sm:w-72 border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
+            className="w-full sm:w-72 border border-slate-700 rounded-xl p-1 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
           />
 
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
+            className="border border-slate-700 rounded-xl p-1 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
           >
             <option value="ALL">All Status</option>
             <option value="DRAFT">DRAFT</option>
@@ -588,7 +588,7 @@ export default function RequestList({ view = "all" }) {
             type="button"
             onClick={load}
             disabled={loading}
-            className="px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
+            className="p-1 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
           >
             {loading ? "Loading..." : "Refresh"}
           </button>
@@ -629,40 +629,40 @@ export default function RequestList({ view = "all" }) {
                   className="border-t border-slate-800 hover:bg-slate-950/30 cursor-pointer"
                   onClick={() => id && router.push(`/requests/${id}`)}
                 >
-                  <td className="px-3 py-2 text-slate-100 max-w-[320px] truncate">
+                  <td className="p-1 text-slate-100 truncate">
                     {r.title || "Untitled"}
                   </td>
 
-                  <td className="px-3 py-2">
+                  <td className="p-1">
                     <StatusBadge status={status} />
                   </td>
 
-                  <td className="px-3 py-2 text-slate-300">{r.type || "—"}</td>
+                  <td className="p-1 text-slate-300">{r.type || "—"}</td>
 
-                  <td className="px-3 py-2 text-slate-300">
+                  <td className="p-1 text-slate-300">
                     {r.projectId ? `${r.projectId}` : r.projectName || "—"}
                   </td>
 
-                  <td className="px-3 py-2 text-slate-300">
+                  <td className="p-1 text-slate-300">
                     {r.contractSupplier || "—"}
                   </td>
 
-                  <td className="px-3 py-2 text-slate-300">
+                  <td className="p-1 text-slate-300">
                     {r.createdBy || "—"}
                   </td>
 
-                  <td className="px-3 py-2 text-slate-300">
+                  <td className="p-1 text-slate-300">
                     {fmtDate(r.createdAt)}
                   </td>
 
-                  <td className="px-3 py-2 text-right">
+                  <td className="p-1 text-right">
                     <div
-                      className="flex flex-wrap justify-end gap-2"
+                      className="flex flex-wrap justify-end gap-1"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
                         type="button"
-                        className="text-xs px-2 py-1 rounded-lg border border-slate-700 hover:bg-slate-800"
+                        className="text-xs p-1 rounded-lg border border-slate-700 hover:bg-slate-800"
                         onClick={() => {
                           setActiveReq(r);
                           setOffersOpen(true);
@@ -673,7 +673,7 @@ export default function RequestList({ view = "all" }) {
 
                       <Link
                         href={id ? `/requests/${id}` : "/requests"}
-                        className="text-xs px-2 py-1 rounded-lg border border-slate-700 hover:bg-slate-800"
+                        className="text-xs p-1 rounded-lg border border-slate-700 hover:bg-slate-800"
                       >
                         View
                       </Link>
@@ -681,7 +681,7 @@ export default function RequestList({ view = "all" }) {
                       {canEdit && (
                         <Link
                           href={`/requests/${id}/edit`}
-                          className="text-xs px-2 py-1 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
+                          className="text-xs p-1 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
                         >
                           Edit
                         </Link>
