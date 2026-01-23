@@ -2,143 +2,88 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import toast from "react-hot-toast";
-import { apiGet, apiPost } from "../lib/api";
+import { io } from "socket.io-client";
 import { AuthContext } from "./AuthContext";
+import { apiGet } from "../lib/api";
 
 export const NotificationContext = createContext({
   unreadCount: 0,
   refreshUnread: async () => {},
-  refreshList: async () => {},
-  notifications: [],
-  loading: false,
-  markRead: async () => {},
-  markAllRead: async () => {},
 });
 
-function pickList(res) {
-  // supports {data:[...]} or [...]
-  const d = res?.data;
-  if (Array.isArray(d)) return d;
-  if (Array.isArray(d?.data)) return d.data;
-  return [];
-}
-
 export function NotificationProvider({ children }) {
-  const { authHeaders, loading: authLoading, user } = useContext(AuthContext);
+  const { authHeaders, user } = useContext(AuthContext);
 
   const [unreadCount, setUnreadCount] = useState(0);
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const socketRef = useRef(null);
 
-  const isReady = useMemo(() => {
-    return !authLoading && !!user?.role && !!authHeaders?.["x-user-role"];
-  }, [authLoading, user?.role, authHeaders]);
+  const role = useMemo(() => user?.role || "", [user?.role]);
+  const username = useMemo(() => user?.username || "", [user?.username]);
 
-  const refreshUnread = useCallback(async () => {
-    if (!isReady) return;
+  async function refreshUnread() {
+    if (!authHeaders?.["x-user-role"]) return;
     try {
-      const r = await apiGet("/notifications/unread-count", {
+      const res = await apiGet("/notifications/unread-count", {
         headers: authHeaders,
       });
-      setUnreadCount(Number(r?.data?.unreadCount || 0));
+      setUnreadCount(Number(res?.data?.unreadCount || 0));
     } catch {
-      // silent
+      // ignore
     }
-  }, [authHeaders, isReady]);
+  }
 
-  const refreshList = useCallback(
-    async ({ unreadOnly = false } = {}) => {
-      if (!isReady) return;
-      setLoading(true);
-      try {
-        const r = await apiGet("/notifications", {
-          headers: authHeaders,
-          params: { page: 1, limit: 50, unreadOnly },
-        });
-        setNotifications(pickList(r));
-      } catch (e) {
-        toast.error(e?.response?.data?.error || "Failed to load notifications");
-        setNotifications([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [authHeaders, isReady],
-  );
-
-  const markRead = useCallback(
-    async (id) => {
-      if (!isReady || !id) return;
-      try {
-        await apiPost(
-          `/notifications/${id}/read`,
-          {},
-          { headers: authHeaders },
-        );
-        setNotifications((prev) =>
-          prev.map((n) =>
-            String(n?._id) === String(id)
-              ? { ...n, read: true, readAt: new Date() }
-              : n,
-          ),
-        );
-        refreshUnread();
-      } catch (e) {
-        toast.error(e?.response?.data?.error || "Failed to mark read");
-      }
-    },
-    [authHeaders, isReady, refreshUnread],
-  );
-
-  const markAllRead = useCallback(async () => {
-    if (!isReady) return;
-    try {
-      await apiPost("/notifications/read-all", {}, { headers: authHeaders });
-      setNotifications((prev) =>
-        prev.map((n) => ({ ...n, read: true, readAt: new Date() })),
-      );
-      setUnreadCount(0);
-      toast.success("All notifications marked as read");
-    } catch (e) {
-      toast.error(e?.response?.data?.error || "Failed to mark all read");
-    }
-  }, [authHeaders, isReady]);
-
-  // ✅ Poll unread count
+  // polling fallback (every 20s)
   useEffect(() => {
-    if (!isReady) return;
-
     refreshUnread();
-    const t = setInterval(refreshUnread, 15000); // 15 sec
-
+    const t = setInterval(refreshUnread, 20000);
     return () => clearInterval(t);
-  }, [isReady, refreshUnread]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authHeaders?.["x-user-role"], authHeaders?.["x-username"]]);
 
-  // ✅ Load latest list once after login
+  // realtime socket (optional)
   useEffect(() => {
-    if (!isReady) return;
-    refreshList({ unreadOnly: false });
-  }, [isReady, refreshList]);
+    if (!user?.token) return;
+    // connect to same API host
+    const base =
+      process.env.NEXT_PUBLIC_API_BASE ||
+      "https://service-management-server.onrender.com";
+    const s = io(base, { transports: ["websocket", "polling"] });
+    socketRef.current = s;
+
+    s.on("connect", () => {
+      s.emit("join", { username, role });
+    });
+
+    s.on("notification:new", (n) => {
+      // increase counter
+      setUnreadCount((c) => c + 1);
+
+      // toast
+      toast((t) => (
+        <div className="text-sm">
+          <div className="font-semibold text-slate-100">
+            {n?.title || "Notification"}
+          </div>
+          <div className="text-slate-300 text-xs mt-1">{n?.message || ""}</div>
+        </div>
+      ));
+    });
+
+    return () => {
+      s.disconnect();
+      socketRef.current = null;
+    };
+  }, [user?.token, username, role]);
 
   return (
-    <NotificationContext.Provider
-      value={{
-        unreadCount,
-        notifications,
-        loading,
-        refreshUnread,
-        refreshList,
-        markRead,
-        markAllRead,
-      }}
-    >
+    <NotificationContext.Provider value={{ unreadCount, refreshUnread }}>
       {children}
     </NotificationContext.Provider>
   );
