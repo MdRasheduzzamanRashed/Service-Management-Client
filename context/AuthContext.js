@@ -29,6 +29,12 @@ function normalizeRole(raw) {
     .replace(/\s+/g, "_");
 }
 
+function normalizeUsername(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase();
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -36,20 +42,40 @@ export function AuthProvider({ children }) {
   const normalizeUser = useCallback((payload) => {
     if (!payload || typeof payload !== "object") return null;
 
-    // ✅ IMPORTANT: accept {token, user:{...}} OR {...user, token}
+    // ✅ accept {token, user:{...}} OR {...user, token}
     const u =
       payload.user && typeof payload.user === "object"
         ? { ...payload.user, token: payload.token || payload.user.token }
         : payload;
 
     const _id = normalizeId(u._id || u.id || u.userId);
+
+    // ✅ role
     const role = normalizeRole(u.role || u.userRole);
 
+    // ✅ token
     const token = u.token || u.accessToken || u.jwt || null;
-    const username = u.username || null;
-    const displayUsername = u.displayUsername || u.display_name || null;
 
-    return { ...u, _id, role, token, username, displayUsername };
+    // ✅ username fields (support many shapes)
+    const username = u.username || u.userName || u.login || u.handle || null;
+
+    const displayUsername =
+      u.displayUsername || u.display_name || u.displayName || u.name || null;
+
+    // ✅ ensure we have a usable username for headers
+    const headerUsername = normalizeUsername(username || displayUsername);
+
+    return {
+      ...u,
+      _id,
+      role,
+      token,
+      username: username ? normalizeUsername(username) : null,
+      displayUsername: displayUsername
+        ? normalizeUsername(displayUsername)
+        : null,
+      headerUsername: headerUsername || null,
+    };
   }, []);
 
   useEffect(() => {
@@ -83,9 +109,20 @@ export function AuthProvider({ children }) {
 
   const authHeaders = useMemo(() => {
     const headers = {};
+
     if (user?.token) headers.Authorization = `Bearer ${user.token}`;
-    if (user?.role) headers["x-user-role"] = normalizeRole(user.role);
-    if (user?.username) headers["x-username"] = String(user.username);
+
+    const role = normalizeRole(user?.role);
+    if (role) headers["x-user-role"] = role;
+
+    // ✅ FIX: always send x-username if we have any usable username
+    const uname =
+      user?.headerUsername ||
+      normalizeUsername(user?.username) ||
+      normalizeUsername(user?.displayUsername);
+
+    if (uname) headers["x-username"] = String(uname);
+
     return headers;
   }, [user]);
 
