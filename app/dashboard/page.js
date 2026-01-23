@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext, useMemo } from "react";
+import { Suspense, useContext, useMemo } from "react";
 import { AuthContext } from "../../context/AuthContext";
 
 import DashboardProjectsCard from "../../components/DashboardProjectsCard";
@@ -17,7 +17,7 @@ function normalizeRole(raw) {
   return s.toUpperCase().replace(/\s+/g, "_");
 }
 
-export default function Dashboard() {
+function DashboardContent() {
   const { user, loading } = useContext(AuthContext);
 
   const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
@@ -27,7 +27,6 @@ export default function Dashboard() {
   const isPO = role === "PROCUREMENT_OFFICER";
   const isAdmin = role === "SYSTEM_ADMIN";
 
-  // Admin sees everything
   const canSeeAll = isAdmin;
 
   if (loading) {
@@ -38,7 +37,6 @@ export default function Dashboard() {
 
   return (
     <main className="space-y-6 p-4">
-      {/* ✅ STATS CENTER */}
       <section className="flex justify-center gap-4 items-center">
         <DashboardProjectsCard />
         <DashboardContractsCard />
@@ -46,9 +44,7 @@ export default function Dashboard() {
         <DashboardRequestsCard variant="all" />
       </section>
 
-      {/* ✅ ROLE BASED CONTENT */}
       <section className="space-y-6">
-        {/* ✅ PM: Projects + Requests */}
         {(isPM || canSeeAll) && (
           <div className="space-y-4">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
@@ -87,31 +83,24 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ✅ RP: In Review + Recommended */}
         {(isRP || canSeeAll) && !isPM && (
           <div className="space-y-4">
             <div className="mt-3">
               <RequestList view="review" />
             </div>
-
             <div className="mt-3">
-              {/* ✅ Recommended list is filtered by status */}
               <RequestList view="all" />
             </div>
           </div>
         )}
 
-        {/* ✅ PO: Orders Requests */}
         {(isPO || canSeeAll) && !isPM && !isRP && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-4">
-            <MyOrdersPage></MyOrdersPage>
-            {/* If you already have Orders page, just link above */}
-            {/* Otherwise, we can show RequestList with status filter SENT_TO_PO */}
+            <MyOrdersPage />
             <RequestList view="all" />
           </div>
         )}
 
-        {/* ✅ System Admin fallback */}
         {canSeeAll && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
             <h2 className="text-sm font-semibold text-slate-100">
@@ -125,5 +114,15 @@ export default function Dashboard() {
         )}
       </section>
     </main>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense
+      fallback={<main className="p-6 text-sm text-slate-300">Loading…</main>}
+    >
+      <DashboardContent />
+    </Suspense>
   );
 }
