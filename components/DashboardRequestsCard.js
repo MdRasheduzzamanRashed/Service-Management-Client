@@ -1,6 +1,7 @@
 "use client";
 
 import { useContext, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { AuthContext } from "../context/AuthContext";
 import { apiGet } from "../lib/api";
@@ -27,11 +28,8 @@ const STATUSES = [
 
 function statusNumberClass(statusKey, value) {
   const n = Number(value || 0);
-
-  // ✅ if no items -> muted/gray
   if (n <= 0) return "text-slate-500";
 
-  // ✅ if has items -> highlight per status (dark theme friendly)
   switch (statusKey) {
     case "DRAFT":
       return "text-slate-200";
@@ -59,6 +57,8 @@ function statusNumberClass(statusKey, value) {
 }
 
 export default function DashboardRequestsCard({ variant = "all" }) {
+  const router = useRouter();
+
   // variant: "my" | "all"
   const { user, authHeaders, loading: authLoading } = useContext(AuthContext);
 
@@ -84,19 +84,33 @@ export default function DashboardRequestsCard({ variant = "all" }) {
   useEffect(() => {
     if (authLoading || !allowed) return;
 
+    // must have role header
     if (!authHeaders?.["x-user-role"]) return;
+
+    // "my" requires username header
     if (variant === "my" && !authHeaders?.["x-username"]) return;
 
     let alive = true;
-    const t = toast.loading("Loading requests...");
+    const toastId = toast.loading("Loading requests...");
 
     async function load() {
       try {
         const params = {};
         if (variant === "my") params.view = "my";
 
-        const res = await apiGet("/requests", { params, headers: authHeaders });
-        const list = Array.isArray(res?.data) ? res.data : [];
+        const res = await apiGet("/requests", {
+          params,
+          headers: { ...authHeaders },
+        });
+
+        // ✅ FIX: backend returns { data, meta }
+        const payload = res?.data;
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
         if (!alive) return;
 
         setTotal(list.length);
@@ -110,10 +124,10 @@ export default function DashboardRequestsCard({ variant = "all" }) {
         }
         setCounts(next);
 
-        toast.success("Requests loaded", { id: t });
+        toast.success("Requests loaded", { id: toastId });
       } catch (e) {
         toast.error(e?.response?.data?.error || "Failed to load requests", {
-          id: t,
+          id: toastId,
         });
       }
     }
@@ -122,7 +136,7 @@ export default function DashboardRequestsCard({ variant = "all" }) {
 
     return () => {
       alive = false;
-      toast.dismiss(t);
+      toast.dismiss(toastId);
     };
   }, [authLoading, allowed, authHeaders, variant]);
 
