@@ -838,7 +838,16 @@ export default function RequestList({ view = "all" }) {
                       >
                         View
                       </Link>
-
+                      {/* ✅ RP Evaluation button */}
+                      {role === "RESOURCE_PLANNER" &&
+                        status === "BID_EVALUATION" && (
+                          <Link
+                            href={`/requests/${id}/evaluation`}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
+                          >
+                            Evaluate
+                          </Link>
+                        )}
                       {canEdit && (
                         <Link
                           href={`/requests/${id}/edit`}
