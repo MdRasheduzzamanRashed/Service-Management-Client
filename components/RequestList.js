@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { AuthContext } from "../context/AuthContext";
 import { apiGet, apiPost } from "../lib/api";
@@ -15,11 +22,13 @@ function normalizeRole(raw) {
     .toUpperCase()
     .replace(/\s+/g, "_");
 }
+
 function normalizeUsername(raw) {
   return String(raw || "")
     .trim()
     .toLowerCase();
 }
+
 function normalizeId(raw) {
   if (!raw) return "";
   if (typeof raw === "string") return raw;
@@ -30,6 +39,7 @@ function normalizeId(raw) {
     return "";
   }
 }
+
 function fmtDate(v) {
   if (!v) return "—";
   const d = new Date(v);
@@ -37,8 +47,52 @@ function fmtDate(v) {
   return d.toLocaleDateString();
 }
 
+function getErrMsg(e) {
+  return (
+    e?.response?.data?.error ||
+    e?.response?.data?.message ||
+    e?.message ||
+    "Request failed"
+  );
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isRetryableError(err) {
+  // retry on network errors or 5xx
+  if (!err?.response) return true;
+  const s = err.response.status;
+  return s >= 500;
+}
+
+/**
+ * Fetch with retry + exponential backoff
+ * - abortable (AbortController)
+ */
+async function fetchWithRetry(fn, { retries = 2, baseDelay = 400 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (e) {
+      lastErr = e;
+
+      // do not retry abort
+      if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") throw e;
+
+      if (!isRetryableError(e) || attempt === retries) throw e;
+
+      const delay = baseDelay * Math.pow(2, attempt);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
 /* =========================
-   UI
+   UI: Status Badge
 ========================= */
 function StatusBadge({ status }) {
   const s = String(status || "").toUpperCase();
@@ -76,7 +130,7 @@ function StatusBadge({ status }) {
 }
 
 /* =========================
-   Offers Modal (FIXED)
+   Offers Modal
 ========================= */
 function scoreOffer(o) {
   const price = Number(o?.price ?? 1e12);
@@ -87,17 +141,12 @@ function scoreOffer(o) {
 function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   const requestId = useMemo(() => normalizeId(reqDoc?._id), [reqDoc]);
 
-  // ✅ KEY: keep a local request state (server truth)
   const [request, setRequest] = useState(reqDoc || null);
-
   const [offers, setOffers] = useState([]);
+
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [loadingReq, setLoadingReq] = useState(false);
   const [err, setErr] = useState("");
-
-  const canRecommend = role === "RESOURCE_PLANNER";
-  const canSendToPO = role === "PROJECT_MANAGER";
-  const canOrder = role === "PROCUREMENT_OFFICER";
 
   const requestStatus = useMemo(
     () => String(request?.status || "").toUpperCase(),
@@ -109,17 +158,52 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     [request?.recommendedOfferId],
   );
 
-  // ✅ always refresh request from server
+  const canRecommend = role === "RESOURCE_PLANNER";
+  const canSendToPO = role === "PROJECT_MANAGER";
+  const canOrder = role === "PROCUREMENT_OFFICER";
+
+  const bestAuto = useMemo(() => {
+    const arr = (offers || [])
+      .slice()
+      .sort((a, b) => scoreOffer(a) - scoreOffer(b));
+    return arr[0] || null;
+  }, [offers]);
+
+  const disabledSendToPO = requestStatus !== "RECOMMENDED";
+  const disabledOrder =
+    requestStatus !== "SENT_TO_PO" || (!recommendedOfferId && !bestAuto?._id);
+
+  // abort controllers (enterprise)
+  const offersAbortRef = useRef(null);
+  const reqAbortRef = useRef(null);
+
   const loadRequest = useCallback(async () => {
     if (!requestId) return;
+
+    // cancel previous
+    reqAbortRef.current?.abort();
+    const ac = new AbortController();
+    reqAbortRef.current = ac;
+
     try {
       setLoadingReq(true);
-      const r = await apiGet(`/requests/${requestId}`, {
-        headers: authHeaders,
-      });
+      const r = await fetchWithRetry(
+        () =>
+          apiGet(`/requests/${requestId}`, {
+            headers: {
+              ...authHeaders,
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache",
+            },
+            params: { _t: Date.now() },
+            signal: ac.signal,
+          }),
+        { retries: 1 },
+      );
       setRequest(r?.data || null);
     } catch (e) {
-      // keep old request if fetch fails
+      if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
+      // keep old request if fail
     } finally {
       setLoadingReq(false);
     }
@@ -127,17 +211,34 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
   const loadOffers = useCallback(async () => {
     if (!requestId) return;
+
+    offersAbortRef.current?.abort();
+    const ac = new AbortController();
+    offersAbortRef.current = ac;
+
     try {
       setErr("");
       setLoadingOffers(true);
-      const res = await apiGet("/offers", {
-        params: { requestId },
-        headers: authHeaders,
-      });
+
+      const res = await fetchWithRetry(
+        () =>
+          apiGet("/offers", {
+            params: { requestId, _t: Date.now() },
+            headers: {
+              ...authHeaders,
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache",
+            },
+            signal: ac.signal,
+          }),
+        { retries: 2, baseDelay: 450 },
+      );
+
       setOffers(Array.isArray(res?.data) ? res.data : []);
     } catch (e) {
+      if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
       setOffers([]);
-      setErr(e?.response?.data?.error || e?.message || "Failed to load offers");
+      setErr(getErrMsg(e));
     } finally {
       setLoadingOffers(false);
     }
@@ -147,26 +248,29 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     setRequest(reqDoc || null);
     loadRequest();
     loadOffers();
-  }, [reqDoc, loadRequest, loadOffers]);
 
-  const bestAuto = useMemo(() => {
-    const arr = (offers || [])
-      .slice()
-      .sort((a, b) => scoreOffer(a) - scoreOffer(b));
-    return arr[0] || null;
-  }, [offers]);
+    return () => {
+      offersAbortRef.current?.abort();
+      reqAbortRef.current?.abort();
+    };
+  }, [reqDoc, loadOffers, loadRequest]);
 
   async function recommend(offerId) {
     try {
       setErr("");
-      // ✅ IMPORTANT: backend should return updated request (recommendedOfferId + status)
       const res = await apiPost(
         `/requests/${requestId}/rp-recommend-offer`,
         { offerId },
-        { headers: authHeaders },
+        {
+          headers: {
+            ...authHeaders,
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          params: { _t: Date.now() },
+        },
       );
 
-      // ✅ Prefer server payload if you return it, otherwise re-fetch
       const updatedReq = res?.data?.request;
       const updatedOffers = res?.data?.offers;
 
@@ -176,10 +280,9 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       if (!updatedReq) await loadRequest();
       if (!Array.isArray(updatedOffers)) await loadOffers();
 
-      // notify parent
       onChanged?.(updatedReq || null);
     } catch (e) {
-      setErr(e?.response?.data?.error || e?.message || "Recommend failed");
+      setErr(getErrMsg(e));
     }
   }
 
@@ -189,7 +292,14 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       const res = await apiPost(
         `/requests/${requestId}/send-to-po`,
         {},
-        { headers: authHeaders },
+        {
+          headers: {
+            ...authHeaders,
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          params: { _t: Date.now() },
+        },
       );
 
       const updatedReq = res?.data?.request;
@@ -198,7 +308,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
       onChanged?.(updatedReq || null);
     } catch (e) {
-      setErr(e?.response?.data?.error || e?.message || "Send to PO failed");
+      setErr(getErrMsg(e));
     }
   }
 
@@ -206,7 +316,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     try {
       setErr("");
 
-      // ✅ order should use recommendedOfferId (fresh) if exists
       const offerId = String(recommendedOfferId || bestAuto?._id || "").trim();
       if (!offerId) {
         setErr("No offer to order (missing recommended offer).");
@@ -216,7 +325,14 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       const res = await apiPost(
         `/requests/${requestId}/order`,
         { offerId },
-        { headers: authHeaders },
+        {
+          headers: {
+            ...authHeaders,
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+          params: { _t: Date.now() },
+        },
       );
 
       const updatedReq = res?.data?.request;
@@ -225,22 +341,17 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
       onChanged?.(updatedReq || null);
     } catch (e) {
-      setErr(e?.response?.data?.error || e?.message || "Order failed");
+      setErr(getErrMsg(e));
     }
   }
 
-  const disabledSendToPO = requestStatus !== "RECOMMENDED";
-  const disabledOrder =
-    requestStatus !== "SENT_TO_PO" || (!recommendedOfferId && !bestAuto?._id);
-
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="w-full rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
+      <div className="w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-              Offers
-              <StatusBadge status={requestStatus} />
+              Offers <StatusBadge status={requestStatus} />
               {(loadingReq || loadingOffers) && (
                 <span className="text-[11px] text-slate-400">(syncing…)</span>
               )}
@@ -250,6 +361,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
               <span className="text-slate-300">Request ID:</span>{" "}
               <span className="text-slate-200">{requestId || "—"}</span>
             </p>
+
             <p className="text-[11px] text-slate-500 mt-1">
               Total offers:{" "}
               <span className="text-slate-200">{offers.length}</span>
@@ -261,6 +373,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 </>
               ) : null}
             </p>
+
             {recommendedOfferId && (
               <p className="text-[11px] text-slate-500 mt-1">
                 Recommended Offer ID:{" "}
@@ -276,12 +389,14 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 loadOffers();
               }}
               className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
+              type="button"
             >
               Refresh
             </button>
             <button
               onClick={onClose}
               className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
+              type="button"
             >
               Close
             </button>
@@ -290,7 +405,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
         {err && <div className="text-xs text-red-300">{err}</div>}
 
-        {/* Action bar */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-800 bg-slate-900/30 p-3">
           <div className="text-xs text-slate-300">
             <span className="text-slate-400">Tip:</span> Best offer auto-score
@@ -309,6 +423,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 disabled={disabledSendToPO}
                 className="px-3 py-2 rounded-xl bg-indigo-500 text-black text-xs disabled:opacity-50"
                 title="PM: RECOMMENDED -> SENT_TO_PO"
+                type="button"
               >
                 Send to PO
               </button>
@@ -320,6 +435,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 disabled={disabledOrder}
                 className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs disabled:opacity-50"
                 title="PO: SENT_TO_PO -> ORDERED"
+                type="button"
               >
                 Place Order
               </button>
@@ -327,7 +443,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
         </div>
 
-        {/* Offers table */}
         <div className="overflow-x-auto rounded-xl border border-slate-800">
           <table className="min-w-[900px] w-full text-sm">
             <thead className="bg-slate-950/60 text-[11px] text-slate-400">
@@ -342,7 +457,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
             </thead>
 
             <tbody>
-              {offers.map((o) => {
+              {(offers || []).map((o) => {
                 const oid = normalizeId(o?._id);
                 const isRec =
                   recommendedOfferId &&
@@ -350,7 +465,10 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
                 return (
                   <tr
-                    key={oid || Math.random()}
+                    key={
+                      oid ||
+                      `${o?.providerUsername}-${o?.price}-${o?.deliveryDays}`
+                    }
                     className="border-t border-slate-800 hover:bg-slate-950/30"
                   >
                     <td className="px-3 py-2 text-slate-100">
@@ -385,10 +503,11 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                     <td className="px-3 py-2 text-right">
                       {canRecommend ? (
                         <button
-                          className="p-1 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
                           onClick={() => recommend(oid)}
                           disabled={!oid || requestStatus !== "BID_EVALUATION"}
                           title="RP: Recommend this offer"
+                          type="button"
                         >
                           Recommend
                         </button>
@@ -400,7 +519,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 );
               })}
 
-              {!loadingOffers && offers.length === 0 && (
+              {!loadingOffers && (!offers || offers.length === 0) && (
                 <tr>
                   <td colSpan={6} className="px-3 py-6 text-xs text-slate-400">
                     No offers found for this request.
@@ -423,16 +542,21 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 }
 
 /* =========================
-   Main Component
+   Enterprise RequestList
 ========================= */
 export default function RequestList({ view = "all" }) {
   const router = useRouter();
   const { user, authHeaders, loading: authLoading } = useContext(AuthContext);
 
   const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
-  const username = useMemo(
-    () => normalizeUsername(user?.username),
-    [user?.username],
+
+  // ✅ Enterprise: derive username from headers first (most reliable)
+  const headerUsername = useMemo(
+    () =>
+      normalizeUsername(
+        authHeaders?.["x-username"] || user?.username || user?.displayUsername,
+      ),
+    [authHeaders, user?.username, user?.displayUsername],
   );
 
   const isPM = role === "PROJECT_MANAGER";
@@ -447,13 +571,27 @@ export default function RequestList({ view = "all" }) {
 
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
 
+  // search + filter
   const [q, setQ] = useState("");
+  const [qDebounced, setQDebounced] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
+  // offers modal
   const [offersOpen, setOffersOpen] = useState(false);
   const [activeReq, setActiveReq] = useState(null);
+
+  // AbortController to cancel in-flight loads (enterprise)
+  const abortRef = useRef(null);
+
+  // debounce search
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
 
   const title = useMemo(() => {
     if (view === "my") return "My Requests";
@@ -461,47 +599,86 @@ export default function RequestList({ view = "all" }) {
     return "All Requests";
   }, [view]);
 
-  const load = useCallback(async () => {
-    if (!canSee) return;
-    if (!headersReady) return;
+  const buildParams = useCallback(() => {
+    const params = {};
+    if (view === "my") params.view = "my";
+    if (view === "review") params.status = "IN_REVIEW";
+    return params;
+  }, [view]);
 
-    if (view === "my" && (!isPM || !usernameReady)) {
-      setList([]);
-      setErr(
-        !isPM
-          ? "Only Project Manager can view My Requests."
-          : "Missing x-username. Logout/login again.",
-      );
-      return;
-    }
+  const load = useCallback(
+    async ({ isManual = false } = {}) => {
+      if (!canSee) return;
 
-    try {
-      setErr("");
-      setLoading(true);
+      // must have role header
+      if (!headersReady) {
+        setList([]);
+        setErr("Missing auth header x-user-role. Logout/login again.");
+        return;
+      }
 
-      const params = {};
-      if (view === "my") params.view = "my";
-      if (view === "review") params.status = "IN_REVIEW";
+      // My view requires username header (your backend logic)
+      if (view === "my" && (!isPM || !usernameReady)) {
+        setList([]);
+        setErr(
+          !isPM
+            ? "Only Project Manager can view My Requests."
+            : "Missing x-username. Logout/login again.",
+        );
+        return;
+      }
 
-      const res = await apiGet("/requests", { headers: authHeaders, params });
-      setList(Array.isArray(res?.data) ? res.data : []);
-    } catch (e) {
-      setList([]);
-      setErr(
-        e?.response?.data?.error || e?.message || "Failed to load requests",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [authHeaders, canSee, headersReady, isPM, usernameReady, view]);
+      // cancel previous request
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      try {
+        setErr("");
+        if (isManual) setRefreshing(true);
+        else setLoading(true);
+
+        const params = buildParams();
+
+        const res = await fetchWithRetry(
+          () =>
+            apiGet("/requests", {
+              headers: {
+                ...authHeaders,
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache",
+              },
+              // extra cachebuster: prevents 304 from proxies/browsers
+              params: { ...params, _t: Date.now() },
+              signal: ac.signal,
+            }),
+          { retries: 2, baseDelay: 450 },
+        );
+
+        const data = Array.isArray(res?.data) ? res.data : [];
+        setList(data);
+        setLastUpdatedAt(new Date());
+      } catch (e) {
+        if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
+        setList([]);
+        setErr(getErrMsg(e));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [authHeaders, buildParams, canSee, headersReady, isPM, usernameReady, view],
+  );
 
   useEffect(() => {
     if (authLoading) return;
-    load();
+    load({ isManual: false });
+    return () => abortRef.current?.abort();
   }, [authLoading, load]);
 
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const query = (qDebounced || "").toLowerCase();
+
     return (list || []).filter((r) => {
       const s = String(r?.status || "").toUpperCase();
       const okStatus = statusFilter === "ALL" ? true : s === statusFilter;
@@ -522,10 +699,11 @@ export default function RequestList({ view = "all" }) {
 
       return okStatus && okQuery;
     });
-  }, [list, q, statusFilter]);
+  }, [list, qDebounced, statusFilter]);
 
-  if (authLoading)
+  if (authLoading) {
     return <div className="p-4 text-slate-300 text-sm">Loading session...</div>;
+  }
 
   if (!canSee) {
     return (
@@ -547,13 +725,30 @@ export default function RequestList({ view = "all" }) {
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-4">
-      {/* header + controls */}
+      {/* Header + controls */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
+
           <p className="text-[11px] text-slate-400">
             Total: <span className="text-slate-200">{filtered.length}</span>
+            {lastUpdatedAt ? (
+              <>
+                {" "}
+                · Updated:{" "}
+                <span className="text-slate-300">
+                  {lastUpdatedAt.toLocaleTimeString()}
+                </span>
+              </>
+            ) : null}
           </p>
+
+          {view === "my" && isPM && (
+            <p className="text-[11px] text-slate-500">
+              Username:{" "}
+              <span className="text-slate-300">{headerUsername || "—"}</span>
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
@@ -561,13 +756,13 @@ export default function RequestList({ view = "all" }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search title, project, supplier, createdBy..."
-            className="w-full sm:w-72 border border-slate-700 rounded-xl p-1 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
+            className="w-full sm:w-72 border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
           />
 
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-slate-700 rounded-xl p-1 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
+            className="border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
           >
             <option value="ALL">All Status</option>
             <option value="DRAFT">DRAFT</option>
@@ -586,23 +781,27 @@ export default function RequestList({ view = "all" }) {
 
           <button
             type="button"
-            onClick={load}
-            disabled={loading}
-            className="p-1 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
+            onClick={() => load({ isManual: true })}
+            disabled={loading || refreshing}
+            className="px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
           >
-            {loading ? "Loading..." : "Refresh"}
+            {refreshing ? "Refreshing..." : loading ? "Loading..." : "Refresh"}
           </button>
         </div>
       </div>
 
-      {err && <div className="text-xs text-red-300">{err}</div>}
+      {err && (
+        <div className="rounded-xl border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-200">
+          {err}
+        </div>
+      )}
 
-      {/* table */}
+      {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-slate-800">
         <table className="w-full text-sm">
           <thead className="bg-slate-950/60">
             <tr className="text-center text-slate-400">
-              <th className="px-3 py-2">Title</th>
+              <th className="px-3 py-2 text-left">Title</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Type</th>
               <th className="px-3 py-2">Project</th>
@@ -614,55 +813,60 @@ export default function RequestList({ view = "all" }) {
           </thead>
 
           <tbody>
-            {filtered.map((r) => {
+            {(filtered || []).map((r) => {
               const id = normalizeId(r._id || r.id);
               const status = String(r?.status || "").toUpperCase();
               const createdBy = normalizeUsername(r?.createdBy);
 
               const owner =
-                isPM && username && createdBy && username === createdBy;
+                isPM &&
+                headerUsername &&
+                createdBy &&
+                headerUsername === createdBy;
               const canEdit = owner && status === "DRAFT";
 
               return (
                 <tr
-                  key={id || Math.random()}
+                  key={id || `${r?.title}-${r?.createdAt}`}
                   className="border-t border-slate-800 hover:bg-slate-950/30 cursor-pointer"
                   onClick={() => id && router.push(`/requests/${id}`)}
                 >
-                  <td className="p-1 text-slate-100 truncate">
+                  <td className="px-3 py-2 text-slate-100 max-w-[360px] truncate">
                     {r.title || "Untitled"}
                   </td>
 
-                  <td className="p-1">
+                  <td className="px-3 py-2 text-center">
                     <StatusBadge status={status} />
                   </td>
 
-                  <td className="p-1 text-slate-300">{r.type || "—"}</td>
+                  <td className="px-3 py-2 text-slate-300 text-center">
+                    {r.type || "—"}
+                  </td>
 
-                  <td className="p-1 text-slate-300">
+                  <td className="px-3 py-2 text-slate-300 text-center">
                     {r.projectId ? `${r.projectId}` : r.projectName || "—"}
                   </td>
 
-                  <td className="p-1 text-slate-300">
+                  <td className="px-3 py-2 text-slate-300 text-center">
                     {r.contractSupplier || "—"}
                   </td>
 
-                  <td className="p-1 text-slate-300">
+                  <td className="px-3 py-2 text-slate-300 text-center">
                     {r.createdBy || "—"}
                   </td>
 
-                  <td className="p-1 text-slate-300">
+                  <td className="px-3 py-2 text-slate-300 text-center">
                     {fmtDate(r.createdAt)}
                   </td>
 
-                  <td className="p-1 text-right">
+                  <td className="px-3 py-2 text-right">
                     <div
-                      className="flex flex-wrap justify-end gap-1"
+                      className="flex flex-wrap justify-end gap-2"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
                         type="button"
-                        className="text-xs p-1 rounded-lg border border-slate-700 hover:bg-slate-800"
+                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800"
                         onClick={() => {
                           setActiveReq(r);
                           setOffersOpen(true);
@@ -673,7 +877,7 @@ export default function RequestList({ view = "all" }) {
 
                       <Link
                         href={id ? `/requests/${id}` : "/requests"}
-                        className="text-xs p-1 rounded-lg border border-slate-700 hover:bg-slate-800"
+                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800"
                       >
                         View
                       </Link>
@@ -681,7 +885,7 @@ export default function RequestList({ view = "all" }) {
                       {canEdit && (
                         <Link
                           href={`/requests/${id}/edit`}
-                          className="text-xs p-1 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
+                          className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
                         >
                           Edit
                         </Link>
@@ -692,10 +896,18 @@ export default function RequestList({ view = "all" }) {
               );
             })}
 
-            {!loading && filtered.length === 0 && (
+            {!loading && (!filtered || filtered.length === 0) && (
               <tr>
-                <td className="px-3 py-5 text-slate-400 text-xs" colSpan={8}>
+                <td className="px-3 py-6 text-slate-400 text-xs" colSpan={8}>
                   No requests found.
+                </td>
+              </tr>
+            )}
+
+            {loading && (
+              <tr>
+                <td className="px-3 py-6 text-slate-400 text-xs" colSpan={8}>
+                  Loading requests...
                 </td>
               </tr>
             )}
@@ -714,9 +926,8 @@ export default function RequestList({ view = "all" }) {
             setActiveReq(null);
           }}
           onChanged={(updatedReq) => {
-            // update row state quickly (optional)
             if (updatedReq?._id) setActiveReq(updatedReq);
-            load(); // refresh list always
+            load({ isManual: true }); // always refresh list
           }}
         />
       )}
