@@ -49,32 +49,29 @@ export function AuthProvider({ children }) {
         : payload;
 
     const _id = normalizeId(u._id || u.id || u.userId);
-
-    // ✅ role
     const role = normalizeRole(u.role || u.userRole);
 
-    // ✅ token
     const token = u.token || u.accessToken || u.jwt || null;
 
-    // ✅ username fields (support many shapes)
-    const username = u.username || u.userName || u.login || u.handle || null;
-
+    // ✅ username fallback (IMPORTANT)
     const displayUsername =
-      u.displayUsername || u.display_name || u.displayName || u.name || null;
+      u.displayUsername || u.display_name || u.name || null;
+    const usernameRaw =
+      u.username ||
+      u.userName ||
+      u.handle ||
+      u.email || // fallback if you use email
+      displayUsername;
 
-    // ✅ ensure we have a usable username for headers
-    const headerUsername = normalizeUsername(username || displayUsername);
+    const username = usernameRaw ? normalizeUsername(usernameRaw) : null;
 
     return {
       ...u,
       _id,
       role,
       token,
-      username: username ? normalizeUsername(username) : null,
-      displayUsername: displayUsername
-        ? normalizeUsername(displayUsername)
-        : null,
-      headerUsername: headerUsername || null,
+      username,
+      displayUsername: displayUsername || username || null,
     };
   }, []);
 
@@ -109,20 +106,10 @@ export function AuthProvider({ children }) {
 
   const authHeaders = useMemo(() => {
     const headers = {};
-
     if (user?.token) headers.Authorization = `Bearer ${user.token}`;
-
-    const role = normalizeRole(user?.role);
-    if (role) headers["x-user-role"] = role;
-
-    // ✅ FIX: always send x-username if we have any usable username
-    const uname =
-      user?.headerUsername ||
-      normalizeUsername(user?.username) ||
-      normalizeUsername(user?.displayUsername);
-
-    if (uname) headers["x-username"] = String(uname);
-
+    if (user?.role) headers["x-user-role"] = normalizeRole(user.role);
+    if (user?.username)
+      headers["x-username"] = normalizeUsername(user.username);
     return headers;
   }, [user]);
 
