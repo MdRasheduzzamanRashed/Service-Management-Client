@@ -61,7 +61,6 @@ function sleep(ms) {
 }
 
 function isRetryableError(err) {
-  // retry on network errors or 5xx
   if (!err?.response) return true;
   const s = err.response.status;
   return s >= 500;
@@ -69,7 +68,6 @@ function isRetryableError(err) {
 
 /**
  * Fetch with retry + exponential backoff
- * - abortable (AbortController)
  */
 async function fetchWithRetry(fn, { retries = 2, baseDelay = 400 } = {}) {
   let lastErr;
@@ -173,37 +171,33 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   const disabledOrder =
     requestStatus !== "SENT_TO_PO" || (!recommendedOfferId && !bestAuto?._id);
 
-  // abort controllers (enterprise)
+  // abort controllers
   const offersAbortRef = useRef(null);
   const reqAbortRef = useRef(null);
 
   const loadRequest = useCallback(async () => {
     if (!requestId) return;
 
-    // cancel previous
     reqAbortRef.current?.abort();
     const ac = new AbortController();
     reqAbortRef.current = ac;
 
     try {
       setLoadingReq(true);
+
       const r = await fetchWithRetry(
         () =>
           apiGet(`/requests/${requestId}`, {
-            headers: {
-              ...authHeaders,
-              "Cache-Control": "no-cache",
-              Pragma: "no-cache",
-            },
+            headers: { ...authHeaders },
             params: { _t: Date.now() },
             signal: ac.signal,
           }),
         { retries: 1 },
       );
+
       setRequest(r?.data || null);
     } catch (e) {
       if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
-      // keep old request if fail
     } finally {
       setLoadingReq(false);
     }
@@ -224,11 +218,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         () =>
           apiGet("/offers", {
             params: { requestId, _t: Date.now() },
-            headers: {
-              ...authHeaders,
-              "Cache-Control": "no-cache",
-              Pragma: "no-cache",
-            },
+            headers: { ...authHeaders },
             signal: ac.signal,
           }),
         { retries: 2, baseDelay: 450 },
@@ -258,15 +248,12 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   async function recommend(offerId) {
     try {
       setErr("");
+
       const res = await apiPost(
         `/requests/${requestId}/rp-recommend-offer`,
         { offerId },
         {
-          headers: {
-            ...authHeaders,
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
+          headers: { ...authHeaders },
           params: { _t: Date.now() },
         },
       );
@@ -289,24 +276,18 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   async function sendToPO() {
     try {
       setErr("");
-      const res = await apiPost(
+
+      await apiPost(
         `/requests/${requestId}/send-to-po`,
         {},
         {
-          headers: {
-            ...authHeaders,
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
+          headers: { ...authHeaders },
           params: { _t: Date.now() },
         },
       );
 
-      const updatedReq = res?.data?.request;
-      if (updatedReq) setRequest(updatedReq);
-      else await loadRequest();
-
-      onChanged?.(updatedReq || null);
+      await loadRequest();
+      onChanged?.(null);
     } catch (e) {
       setErr(getErrMsg(e));
     }
@@ -322,24 +303,17 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         return;
       }
 
-      const res = await apiPost(
+      await apiPost(
         `/requests/${requestId}/order`,
         { offerId },
         {
-          headers: {
-            ...authHeaders,
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
+          headers: { ...authHeaders },
           params: { _t: Date.now() },
         },
       );
 
-      const updatedReq = res?.data?.request;
-      if (updatedReq) setRequest(updatedReq);
-      else await loadRequest();
-
-      onChanged?.(updatedReq || null);
+      await loadRequest();
+      onChanged?.(null);
     } catch (e) {
       setErr(getErrMsg(e));
     }
@@ -501,7 +475,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                     </td>
 
                     <td className="px-3 py-2 text-right">
-                      {canRecommend ? (
+                      {role === "RESOURCE_PLANNER" ? (
                         <button
                           className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
                           onClick={() => recommend(oid)}
@@ -542,7 +516,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 }
 
 /* =========================
-   Enterprise RequestList
+   RequestList
 ========================= */
 export default function RequestList({ view = "all" }) {
   const router = useRouter();
@@ -550,7 +524,6 @@ export default function RequestList({ view = "all" }) {
 
   const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
 
-  // ✅ Enterprise: derive username from headers first (most reliable)
   const headerUsername = useMemo(
     () =>
       normalizeUsername(
@@ -575,19 +548,15 @@ export default function RequestList({ view = "all" }) {
   const [err, setErr] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
 
-  // search + filter
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
-  // offers modal
   const [offersOpen, setOffersOpen] = useState(false);
   const [activeReq, setActiveReq] = useState(null);
 
-  // AbortController to cancel in-flight loads (enterprise)
   const abortRef = useRef(null);
 
-  // debounce search
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q.trim()), 250);
     return () => clearTimeout(t);
@@ -610,14 +579,12 @@ export default function RequestList({ view = "all" }) {
     async ({ isManual = false } = {}) => {
       if (!canSee) return;
 
-      // must have role header
       if (!headersReady) {
         setList([]);
         setErr("Missing auth header x-user-role. Logout/login again.");
         return;
       }
 
-      // My view requires username header (your backend logic)
       if (view === "my" && (!isPM || !usernameReady)) {
         setList([]);
         setErr(
@@ -628,7 +595,6 @@ export default function RequestList({ view = "all" }) {
         return;
       }
 
-      // cancel previous request
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -643,12 +609,7 @@ export default function RequestList({ view = "all" }) {
         const res = await fetchWithRetry(
           () =>
             apiGet("/requests", {
-              headers: {
-                ...authHeaders,
-                "Cache-Control": "no-cache",
-                Pragma: "no-cache",
-              },
-              // extra cachebuster: prevents 304 from proxies/browsers
+              headers: { ...authHeaders },
               params: { ...params, _t: Date.now() },
               signal: ac.signal,
             }),
@@ -678,7 +639,6 @@ export default function RequestList({ view = "all" }) {
 
   const filtered = useMemo(() => {
     const query = (qDebounced || "").toLowerCase();
-
     return (list || []).filter((r) => {
       const s = String(r?.status || "").toUpperCase();
       const okStatus = statusFilter === "ALL" ? true : s === statusFilter;
@@ -725,11 +685,9 @@ export default function RequestList({ view = "all" }) {
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-4">
-      {/* Header + controls */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
-
           <p className="text-[11px] text-slate-400">
             Total: <span className="text-slate-200">{filtered.length}</span>
             {lastUpdatedAt ? (
@@ -796,7 +754,6 @@ export default function RequestList({ view = "all" }) {
         </div>
       )}
 
-      {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-slate-800">
         <table className="w-full text-sm">
           <thead className="bg-slate-950/60">
@@ -915,7 +872,6 @@ export default function RequestList({ view = "all" }) {
         </table>
       </div>
 
-      {/* Offers modal */}
       {offersOpen && activeReq && (
         <OffersModal
           reqDoc={activeReq}
@@ -925,9 +881,8 @@ export default function RequestList({ view = "all" }) {
             setOffersOpen(false);
             setActiveReq(null);
           }}
-          onChanged={(updatedReq) => {
-            if (updatedReq?._id) setActiveReq(updatedReq);
-            load({ isManual: true }); // always refresh list
+          onChanged={() => {
+            load({ isManual: true });
           }}
         />
       )}
