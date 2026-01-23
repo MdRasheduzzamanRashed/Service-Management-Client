@@ -1,4 +1,3 @@
-// context/NotificationContext.jsx
 "use client";
 
 import {
@@ -7,119 +6,139 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
-import { usePathname } from "next/navigation";
+import toast from "react-hot-toast";
+import { apiGet, apiPost } from "../lib/api";
 import { AuthContext } from "./AuthContext";
-import { apiGet } from "../lib/api";
 
 export const NotificationContext = createContext({
   unreadCount: 0,
   refreshUnread: async () => {},
-  setUnreadCount: () => {},
+  refreshList: async () => {},
+  notifications: [],
+  loading: false,
+  markRead: async () => {},
+  markAllRead: async () => {},
 });
 
+function pickList(res) {
+  // supports {data:[...]} or [...]
+  const d = res?.data;
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d?.data)) return d.data;
+  return [];
+}
+
 export function NotificationProvider({ children }) {
-  const pathname = usePathname();
   const { authHeaders, loading: authLoading, user } = useContext(AuthContext);
 
   const [unreadCount, setUnreadCount] = useState(0);
-  const [lastError, setLastError] = useState("");
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const timerRef = useRef(null);
-  const inFlightRef = useRef(false);
-
-  const isLoggedIn = !!user?.token || !!user?.role;
-  const headersReady = !!authHeaders?.["x-user-role"];
-  const usernameReady = !!authHeaders?.["x-username"];
-
-  // ✅ who should fetch notifications?
-  // - admin roles use role-based notifications (x-user-role)
-  // - PM "my" notifications need x-username for toUsername targeting
-  const canFetch = isLoggedIn && !authLoading && headersReady;
+  const isReady = useMemo(() => {
+    return !authLoading && !!user?.role && !!authHeaders?.["x-user-role"];
+  }, [authLoading, user?.role, authHeaders]);
 
   const refreshUnread = useCallback(async () => {
-    if (!canFetch) return;
-    if (inFlightRef.current) return;
-
-    // If your backend sends some notifications by username only, keep this:
-    // (role-based will work without username too)
-    // If you want strict: require usernameReady; but that can hide badge.
-    // We'll allow it.
-    inFlightRef.current = true;
-
+    if (!isReady) return;
     try {
-      setLastError("");
-
-      const res = await apiGet("/notifications", {
+      const r = await apiGet("/notifications/unread-count", {
         headers: authHeaders,
-        params: {
-          unreadOnly: 1,
-          limit: 100,
-        },
       });
-
-      const data = res?.data;
-      const rows = Array.isArray(data?.data) ? data.data : [];
-
-      // unreadOnly already returns unread items, but still safe:
-      const c = rows.filter((n) => !n?.read).length;
-      setUnreadCount(c);
-    } catch (e) {
-      // do not spam UI, just keep badge stable
-      setLastError(
-        e?.response?.data?.error || e?.message || "Failed to load unread",
-      );
-    } finally {
-      inFlightRef.current = false;
+      setUnreadCount(Number(r?.data?.unreadCount || 0));
+    } catch {
+      // silent
     }
-  }, [authHeaders, canFetch]);
+  }, [authHeaders, isReady]);
 
-  // ✅ If user opens notifications page, immediately clear badge
-  useEffect(() => {
-    if (pathname === "/notifications") {
-      setUnreadCount(0);
-    }
-  }, [pathname]);
-
-  // ✅ Start polling
-  useEffect(() => {
-    // cleanup
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = null;
-
-    if (!canFetch) {
-      setUnreadCount(0);
-      return;
-    }
-
-    // initial fetch
-    refreshUnread();
-
-    // poll every 20s (you can change)
-    timerRef.current = setInterval(() => {
-      refreshUnread();
-    }, 20000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = null;
-    };
-  }, [canFetch, refreshUnread]);
-
-  const value = useMemo(
-    () => ({
-      unreadCount,
-      refreshUnread,
-      setUnreadCount,
-      lastError, // optional (not required in navbar)
-    }),
-    [unreadCount, refreshUnread, lastError],
+  const refreshList = useCallback(
+    async ({ unreadOnly = false } = {}) => {
+      if (!isReady) return;
+      setLoading(true);
+      try {
+        const r = await apiGet("/notifications", {
+          headers: authHeaders,
+          params: { page: 1, limit: 50, unreadOnly },
+        });
+        setNotifications(pickList(r));
+      } catch (e) {
+        toast.error(e?.response?.data?.error || "Failed to load notifications");
+        setNotifications([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [authHeaders, isReady],
   );
 
+  const markRead = useCallback(
+    async (id) => {
+      if (!isReady || !id) return;
+      try {
+        await apiPost(
+          `/notifications/${id}/read`,
+          {},
+          { headers: authHeaders },
+        );
+        setNotifications((prev) =>
+          prev.map((n) =>
+            String(n?._id) === String(id)
+              ? { ...n, read: true, readAt: new Date() }
+              : n,
+          ),
+        );
+        refreshUnread();
+      } catch (e) {
+        toast.error(e?.response?.data?.error || "Failed to mark read");
+      }
+    },
+    [authHeaders, isReady, refreshUnread],
+  );
+
+  const markAllRead = useCallback(async () => {
+    if (!isReady) return;
+    try {
+      await apiPost("/notifications/read-all", {}, { headers: authHeaders });
+      setNotifications((prev) =>
+        prev.map((n) => ({ ...n, read: true, readAt: new Date() })),
+      );
+      setUnreadCount(0);
+      toast.success("All notifications marked as read");
+    } catch (e) {
+      toast.error(e?.response?.data?.error || "Failed to mark all read");
+    }
+  }, [authHeaders, isReady]);
+
+  // ✅ Poll unread count
+  useEffect(() => {
+    if (!isReady) return;
+
+    refreshUnread();
+    const t = setInterval(refreshUnread, 15000); // 15 sec
+
+    return () => clearInterval(t);
+  }, [isReady, refreshUnread]);
+
+  // ✅ Load latest list once after login
+  useEffect(() => {
+    if (!isReady) return;
+    refreshList({ unreadOnly: false });
+  }, [isReady, refreshList]);
+
   return (
-    <NotificationContext.Provider value={value}>
+    <NotificationContext.Provider
+      value={{
+        unreadCount,
+        notifications,
+        loading,
+        refreshUnread,
+        refreshList,
+        markRead,
+        markAllRead,
+      }}
+    >
       {children}
     </NotificationContext.Provider>
   );

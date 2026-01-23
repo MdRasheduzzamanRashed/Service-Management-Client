@@ -1,220 +1,178 @@
 "use client";
 
+import Link from "next/link";
 import { useContext, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import toast from "react-hot-toast";
-import { AuthContext } from "../../context/AuthContext";
-import { apiGet, apiPost } from "../../lib/api";
+import { NotificationContext } from "../../context/NotificationContext";
 
-function fmtTime(v) {
-  if (!v) return "—";
+function fmtDate(v) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString();
 }
 
+function normalizeId(raw) {
+  if (!raw) return "";
+  if (typeof raw === "string") return raw;
+  if (raw?.$oid) return String(raw.$oid);
+  try {
+    return String(raw);
+  } catch {
+    return "";
+  }
+}
+
 export default function NotificationsPage() {
-  const router = useRouter();
-  const { authHeaders, loading: authLoading, user } = useContext(AuthContext);
+  const {
+    notifications,
+    loading,
+    refreshList,
+    markRead,
+    markAllRead,
+    unreadCount,
+  } = useContext(NotificationContext);
 
-  const role = useMemo(() => user?.role || "", [user]);
-  const canLoad = !!authHeaders?.["x-user-role"];
-
-  const [list, setList] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [unreadOnly, setUnreadOnly] = useState(false);
-
-  const unreadCount = useMemo(
-    () => (list || []).filter((n) => !n?.read).length,
-    [list],
-  );
-
-  async function load() {
-    if (!canLoad) return;
-    setLoading(true);
-    const t = toast.loading("Loading notifications...");
-    try {
-      const res = await apiGet("/notifications", {
-        headers: authHeaders,
-        params: { unreadOnly: unreadOnly ? 1 : 0, limit: 100 },
-      });
-
-      const payload = res?.data;
-      const rows = Array.isArray(payload?.data) ? payload.data : [];
-      setList(rows);
-
-      toast.success("Loaded", { id: t });
-    } catch (e) {
-      toast.error(e?.response?.data?.error || "Failed to load", { id: t });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function markRead(id) {
-    if (!id) return;
-    const t = toast.loading("Marking read...");
-    try {
-      await apiPost(`/notifications/${id}/read`, {}, { headers: authHeaders });
-      setList((prev) =>
-        prev.map((x) =>
-          String(x?._id) === String(id) ? { ...x, read: true } : x,
-        ),
-      );
-      toast.success("Marked read", { id: t });
-    } catch (e) {
-      toast.error(e?.response?.data?.error || "Failed", { id: t });
-    }
-  }
-
-  async function markAllRead() {
-    const t = toast.loading("Marking all read...");
-    try {
-      await apiPost("/notifications/read-all", {}, { headers: authHeaders });
-      setList((prev) => prev.map((x) => ({ ...x, read: true })));
-      toast.success("All marked read", { id: t });
-    } catch (e) {
-      toast.error(e?.response?.data?.error || "Failed", { id: t });
-    }
-  }
+  const [tab, setTab] = useState("all"); // all | unread
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!canLoad) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, canLoad, unreadOnly]);
+    refreshList({ unreadOnly: tab === "unread" });
+  }, [tab, refreshList]);
 
-  if (authLoading) {
-    return <div className="p-6 text-slate-300">Loading session...</div>;
-  }
-
-  if (!canLoad) {
-    return (
-      <div className="p-6 text-slate-300">
-        Missing auth headers. Please logout/login again.
-      </div>
-    );
-  }
+  const list = useMemo(() => notifications || [], [notifications]);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-4">
-      <div className="flex items-end justify-between gap-3 flex-wrap">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-100">
+          <h1 className="text-lg font-semibold text-slate-100">
             Notifications
           </h1>
           <p className="text-xs text-slate-400">
-            Role: <span className="text-slate-200">{String(role)}</span> ·
-            Unread:{" "}
-            <span className="text-emerald-300 font-semibold">
-              {unreadCount}
-            </span>
+            Unread: <span className="text-slate-200">{unreadCount}</span>
           </p>
         </div>
 
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 flex-wrap">
           <button
+            onClick={() => setTab("all")}
+            className={
+              "px-3 py-2 rounded-xl text-xs border " +
+              (tab === "all"
+                ? "border-emerald-400 bg-emerald-500/10 text-emerald-200"
+                : "border-slate-700 hover:bg-slate-900 text-slate-200")
+            }
             type="button"
-            onClick={() => setUnreadOnly((v) => !v)}
-            className="px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800"
           >
-            {unreadOnly ? "Show All" : "Show Unread"}
+            All
           </button>
 
           <button
+            onClick={() => setTab("unread")}
+            className={
+              "px-3 py-2 rounded-xl text-xs border " +
+              (tab === "unread"
+                ? "border-emerald-400 bg-emerald-500/10 text-emerald-200"
+                : "border-slate-700 hover:bg-slate-900 text-slate-200")
+            }
             type="button"
+          >
+            Unread
+          </button>
+
+          <button
+            onClick={() => refreshList({ unreadOnly: tab === "unread" })}
+            className="px-3 py-2 rounded-xl text-xs border border-slate-700 hover:bg-slate-900 text-slate-200"
+            type="button"
+            disabled={loading}
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+
+          <button
             onClick={markAllRead}
-            disabled={loading || list.length === 0}
-            className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-sm disabled:opacity-60"
+            className="px-3 py-2 rounded-xl text-xs bg-emerald-500 text-black hover:bg-emerald-400"
+            type="button"
+            disabled={unreadCount <= 0}
           >
             Mark all read
-          </button>
-
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
-          >
-            Refresh
           </button>
         </div>
       </div>
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-        {(list || []).map((n) => {
-          const id = String(n?._id || "");
-          const isUnread = !n?.read;
-          const requestId = String(n?.requestId || "").trim();
-
-          return (
-            <div
-              key={id}
-              className={`border-t border-slate-800 p-4 flex items-start justify-between gap-3 ${
-                isUnread ? "bg-slate-950/30" : ""
-              }`}
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  {isUnread && (
-                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />
-                  )}
-                  <p className="text-sm font-semibold text-slate-100 truncate">
-                    {n?.title || "Notification"}
-                  </p>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-slate-300">
-                    {String(n?.type || "INFO")}
-                  </span>
-                </div>
-
-                <p className="text-sm text-slate-300 mt-1 break-words">
-                  {n?.message || "—"}
-                </p>
-
-                <p className="text-[11px] text-slate-500 mt-2">
-                  {fmtTime(n?.createdAt)}
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2 shrink-0">
-                {requestId ? (
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/requests/${requestId}`)}
-                    className="px-3 py-2 rounded-xl border border-slate-700 text-xs hover:bg-slate-800"
-                  >
-                    Open Request
-                  </button>
-                ) : null}
-
-                {isUnread ? (
-                  <button
-                    type="button"
-                    onClick={() => markRead(id)}
-                    className="px-3 py-2 rounded-xl bg-slate-800 text-xs text-slate-100 hover:bg-slate-700"
-                  >
-                    Mark read
-                  </button>
-                ) : (
-                  <span className="text-[11px] text-slate-500 text-right">
-                    Read
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {!loading && list.length === 0 && (
+        {list.length === 0 && !loading ? (
           <div className="p-6 text-sm text-slate-400">
             No notifications found.
           </div>
-        )}
+        ) : null}
 
-        {loading && (
-          <div className="p-6 text-sm text-slate-400">Loading...</div>
-        )}
+        <ul className="divide-y divide-slate-800">
+          {list.map((n) => {
+            const id = normalizeId(n?._id);
+            const isRead = !!n?.read;
+            const requestId = n?.requestId ? String(n.requestId) : "";
+
+            return (
+              <li
+                key={id || `${n?.type}-${n?.createdAt}`}
+                className={
+                  "p-4 flex flex-col gap-1 " +
+                  (isRead ? "opacity-70" : "bg-slate-950/20")
+                }
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-100">
+                        {n?.title || "Notification"}
+                      </span>
+
+                      {!isRead && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-black font-semibold">
+                          NEW
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-300 mt-1">
+                      {n?.message || "—"}
+                    </p>
+
+                    <p className="text-[11px] text-slate-500 mt-2">
+                      {fmtDate(n?.createdAt)}
+                      {n?.type ? (
+                        <>
+                          {" "}
+                          · <span className="text-slate-400">{n.type}</span>
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {requestId ? (
+                      <Link
+                        href={`/requests/${requestId}`}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-200"
+                      >
+                        Open
+                      </Link>
+                    ) : null}
+
+                    {!isRead ? (
+                      <button
+                        onClick={() => markRead(id)}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-slate-200 text-black hover:bg-white"
+                        type="button"
+                      >
+                        Mark read
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       </div>
     </div>
   );
