@@ -1,199 +1,125 @@
+// context/NotificationContext.jsx
 "use client";
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { io } from "socket.io-client";
+import { usePathname } from "next/navigation";
 import { AuthContext } from "./AuthContext";
-import { ToastContext } from "./ToastContext";
-import { API_BASE, apiGet } from "../lib/api";
+import { apiGet } from "../lib/api";
 
 export const NotificationContext = createContext({
   unreadCount: 0,
-  notifications: [],
-  clearUnread: () => {},
-  reloadNotifications: async () => {},
+  refreshUnread: async () => {},
+  setUnreadCount: () => {},
 });
 
-let socket = null;
-const SOCKET_URL = API_BASE || "";
-
-function keyOf(n) {
-  return (
-    n?.uniqKey ||
-    (n?._id ? String(n._id) : "") ||
-    (n?.id ? String(n.id) : "") ||
-    `${n?.type || "N"}:${n?.requestId || ""}:${n?.createdAt || ""}:${n?.title || ""}`
-  );
-}
-
-function mergeUnique(primary = [], secondary = []) {
-  const out = [];
-  const seen = new Set();
-
-  // primary first (realtime newest), then secondary (history)
-  for (const item of [...primary, ...secondary]) {
-    const k = keyOf(item);
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    out.push(item);
-  }
-
-  // newest first
-  out.sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0));
-  return out;
-}
-
 export function NotificationProvider({ children }) {
-  const { user, authHeaders } = useContext(AuthContext);
-  const { showToast } = useContext(ToastContext);
+  const pathname = usePathname();
+  const { authHeaders, loading: authLoading, user } = useContext(AuthContext);
 
-  const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [lastError, setLastError] = useState("");
 
-  // avoid duplicate connect/register handlers
-  const registeredRef = useRef(false);
-  const handlersAttachedRef = useRef(false);
+  const timerRef = useRef(null);
+  const inFlightRef = useRef(false);
 
-  const toastTypeFor = useMemo(() => {
-    return (type) => {
-      const t = String(type || "").toUpperCase();
+  const isLoggedIn = !!user?.token || !!user?.role;
+  const headersReady = !!authHeaders?.["x-user-role"];
+  const usernameReady = !!authHeaders?.["x-username"];
 
-      // your DB notification types
-      if (t === "REQUEST_EXPIRED") return "warning";
-      if (t === "REQUEST_REACTIVATED") return "success";
+  // ✅ who should fetch notifications?
+  // - admin roles use role-based notifications (x-user-role)
+  // - PM "my" notifications need x-username for toUsername targeting
+  const canFetch = isLoggedIn && !authLoading && headersReady;
 
-      // your socket types (existing)
-      const typeMap = {
-        RequestCreated: "info",
-        RequestSubmitted: "info",
-        ProcurementApproved: "success",
-        ProcurementRejected: "error",
-        OfferSubmitted: "info",
-        OfferSelected: "success",
-        ServiceOrderCreated: "success",
-        ServiceOrderExtended: "warning",
-        ServiceOrderSubstitution: "warning",
-      };
-      return typeMap[type] || "info";
-    };
-  }, []);
+  const refreshUnread = useCallback(async () => {
+    if (!canFetch) return;
+    if (inFlightRef.current) return;
 
-  const reloadNotifications = async () => {
-    if (!user) return;
+    // If your backend sends some notifications by username only, keep this:
+    // (role-based will work without username too)
+    // If you want strict: require usernameReady; but that can hide badge.
+    // We'll allow it.
+    inFlightRef.current = true;
+
     try {
-      // expects API to return: {notifications: [...]}
-      const res = await apiGet("/notifications", { headers: authHeaders });
-      const apiList = Array.isArray(res?.data?.notifications)
-        ? res.data.notifications
-        : Array.isArray(res?.data)
-          ? res.data
-          : [];
+      setLastError("");
 
-      setNotifications((prev) => mergeUnique(prev, apiList));
-    } catch {
-      // silent here; page can show error if needed
+      const res = await apiGet("/notifications", {
+        headers: authHeaders,
+        params: {
+          unreadOnly: 1,
+          limit: 100,
+        },
+      });
+
+      const data = res?.data;
+      const rows = Array.isArray(data?.data) ? data.data : [];
+
+      // unreadOnly already returns unread items, but still safe:
+      const c = rows.filter((n) => !n?.read).length;
+      setUnreadCount(c);
+    } catch (e) {
+      // do not spam UI, just keep badge stable
+      setLastError(
+        e?.response?.data?.error || e?.message || "Failed to load unread",
+      );
+    } finally {
+      inFlightRef.current = false;
     }
-  };
+  }, [authHeaders, canFetch]);
 
-  // 1) Reset when logout
+  // ✅ If user opens notifications page, immediately clear badge
   useEffect(() => {
-    if (!user) {
-      registeredRef.current = false;
-      handlersAttachedRef.current = false;
+    if (pathname === "/notifications") {
+      setUnreadCount(0);
+    }
+  }, [pathname]);
 
-      if (socket) {
-        socket.disconnect();
-        socket = null;
-      }
+  // ✅ Start polling
+  useEffect(() => {
+    // cleanup
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
 
-      setNotifications([]);
+    if (!canFetch) {
       setUnreadCount(0);
       return;
     }
-  }, [user]);
 
-  // 2) Load initial notifications from DB when login
-  useEffect(() => {
-    if (!user) return;
+    // initial fetch
+    refreshUnread();
 
-    (async () => {
-      await reloadNotifications();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.token]); // reload when token changes
-
-  // 3) Socket connect + realtime notifications
-  useEffect(() => {
-    if (!user) return;
-
-    if (!socket) {
-      const opts = {
-        // your backend CORS has credentials: false, so keep this false
-        withCredentials: false,
-        transports: ["websocket", "polling"],
-      };
-
-      socket = SOCKET_URL ? io(SOCKET_URL, opts) : io(opts);
-    }
-
-    // attach handlers once
-    if (!handlersAttachedRef.current) {
-      handlersAttachedRef.current = true;
-
-      socket.on("connect", () => {
-        // register once per session (avoid repeated emits)
-        if (registeredRef.current) return;
-        registeredRef.current = true;
-
-        socket.emit("register", {
-          role: user.role,
-          email: user.email,
-          username: user.username,
-        });
-      });
-
-      socket.on("notification", (notif) => {
-        setNotifications((prev) => mergeUnique([notif, ...prev], []));
-        setUnreadCount((c) => c + 1);
-
-        showToast({
-          title: notif.title || "Notification",
-          type: toastTypeFor(notif.type),
-          link: notif.requestId
-            ? `/requests/${notif.requestId}`
-            : notif.relatedOfferId
-              ? `/offers/${notif.relatedOfferId}`
-              : null,
-        });
-      });
-    }
+    // poll every 20s (you can change)
+    timerRef.current = setInterval(() => {
+      refreshUnread();
+    }, 20000);
 
     return () => {
-      // do NOT disconnect here (would break other pages);
-      // just remove the notification handler if you want,
-      // but we keep it stable to avoid re-adding on route changes.
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
     };
-  }, [user, showToast, toastTypeFor]);
+  }, [canFetch, refreshUnread]);
 
-  function clearUnread() {
-    setUnreadCount(0);
-  }
+  const value = useMemo(
+    () => ({
+      unreadCount,
+      refreshUnread,
+      setUnreadCount,
+      lastError, // optional (not required in navbar)
+    }),
+    [unreadCount, refreshUnread, lastError],
+  );
 
   return (
-    <NotificationContext.Provider
-      value={{
-        unreadCount,
-        notifications,
-        clearUnread,
-        reloadNotifications,
-      }}
-    >
+    <NotificationContext.Provider value={value}>
       {children}
     </NotificationContext.Provider>
   );

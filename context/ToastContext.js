@@ -1,61 +1,60 @@
 "use client";
 
-import { createContext, useState } from "react";
+import { createContext } from "react";
+import toast from "react-hot-toast";
 
 export const ToastContext = createContext({
-  showToast: () => {}
+  showToast: () => {},
 });
 
 export function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([]);
-
   function showToast({ title, type = "info", link = null }) {
-    const id = Date.now();
+    const options = {
+      duration: 3500,
+      style: {
+        borderRadius: "14px",
+        background: "#0f172a",
+        color: "#e2e8f0",
+        border: "1px solid rgba(148,163,184,.25)",
+      },
+    };
 
-    const toast = { id, title, type, link };
+    const content = link ? (
+      <div className="flex flex-col gap-1">
+        <span>{title}</span>
+        <span className="text-xs underline opacity-80">Open related item</span>
+      </div>
+    ) : (
+      title
+    );
 
-    setToasts((prev) => {
-      const arr = [...prev, toast];
-      return arr.length > 5 ? arr.slice(arr.length - 5) : arr;
-    });
+    let t;
 
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 6000);
+    switch (type) {
+      case "success":
+        t = toast.success(content, options);
+        break;
+      case "error":
+        t = toast.error(content, options);
+        break;
+      case "warning":
+        t = toast(content, { ...options, icon: "⚠️" });
+        break;
+      default:
+        t = toast(content, options);
+    }
+
+    if (link) {
+      setTimeout(() => {
+        const el = document.querySelector(`[data-toast-id="${t}"]`);
+        if (el) el.onclick = () => window.location.assign(link);
+      }, 100);
+    }
   }
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-
-      <div className="fixed top-4 right-4 z-50 space-y-3 w-72">
-        {toasts.map((toast) => (
-          <ToastCard key={toast.id} {...toast} />
-        ))}
-      </div>
     </ToastContext.Provider>
-  );
-}
-
-function ToastCard({ title, type, link }) {
-  const colors = {
-    success: "bg-emerald-500 text-black",
-    info: "bg-blue-500 text-white",
-    warning: "bg-amber-400 text-black",
-    error: "bg-red-500 text-white",
-  };
-
-  const cls = colors[type] || colors.info;
-
-  return (
-    <div
-      onClick={() => link && window.location.assign(link)}
-      className={cls + " cursor-pointer px-4 py-3 rounded-xl shadow-lg animate-toast-in border border-black/10"}
-    >
-      <p className="text-sm font-medium">{title}</p>
-      {link && (
-        <p className="text-xs opacity-80 mt-1 underline">Open related item</p>
-      )}
-    </div>
   );
 }
