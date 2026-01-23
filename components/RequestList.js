@@ -66,9 +66,6 @@ function isRetryableError(err) {
   return s >= 500;
 }
 
-/**
- * Fetch with retry + exponential backoff
- */
 async function fetchWithRetry(fn, { retries = 2, baseDelay = 400 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -76,14 +73,9 @@ async function fetchWithRetry(fn, { retries = 2, baseDelay = 400 } = {}) {
       return await fn(attempt);
     } catch (e) {
       lastErr = e;
-
-      // do not retry abort
       if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") throw e;
-
       if (!isRetryableError(e) || attempt === retries) throw e;
-
-      const delay = baseDelay * Math.pow(2, attempt);
-      await sleep(delay);
+      await sleep(baseDelay * Math.pow(2, attempt));
     }
   }
   throw lastErr;
@@ -94,7 +86,6 @@ async function fetchWithRetry(fn, { retries = 2, baseDelay = 400 } = {}) {
 ========================= */
 function StatusBadge({ status }) {
   const s = String(status || "").toUpperCase();
-
   const cls =
     s === "DRAFT"
       ? "bg-slate-900 border-slate-700 text-slate-300"
@@ -129,6 +120,7 @@ function StatusBadge({ status }) {
 
 /* =========================
    Offers Modal
+   ✅ IMPORTANT FIX: remove Cache-Control headers here too
 ========================= */
 function scoreOffer(o) {
   const price = Number(o?.price ?? 1e12);
@@ -150,7 +142,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     () => String(request?.status || "").toUpperCase(),
     [request?.status],
   );
-
   const recommendedOfferId = useMemo(
     () => String(request?.recommendedOfferId || "").trim(),
     [request?.recommendedOfferId],
@@ -171,7 +162,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   const disabledOrder =
     requestStatus !== "SENT_TO_PO" || (!recommendedOfferId && !bestAuto?._id);
 
-  // abort controllers
   const offersAbortRef = useRef(null);
   const reqAbortRef = useRef(null);
 
@@ -184,7 +174,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
     try {
       setLoadingReq(true);
-
       const r = await fetchWithRetry(
         () =>
           apiGet(`/requests/${requestId}`, {
@@ -194,7 +183,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           }),
         { retries: 1 },
       );
-
       setRequest(r?.data || null);
     } catch (e) {
       if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
@@ -224,7 +212,8 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         { retries: 2, baseDelay: 450 },
       );
 
-      setOffers(Array.isArray(res?.data) ? res.data : []);
+      // offers endpoint usually returns array
+      setOffers(Array.isArray(res?.data) ? res.data : res?.data?.data || []);
     } catch (e) {
       if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
       setOffers([]);
@@ -248,7 +237,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   async function recommend(offerId) {
     try {
       setErr("");
-
       const res = await apiPost(
         `/requests/${requestId}/rp-recommend-offer`,
         { offerId },
@@ -276,8 +264,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   async function sendToPO() {
     try {
       setErr("");
-
-      await apiPost(
+      const res = await apiPost(
         `/requests/${requestId}/send-to-po`,
         {},
         {
@@ -286,8 +273,11 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         },
       );
 
-      await loadRequest();
-      onChanged?.(null);
+      const updatedReq = res?.data?.request;
+      if (updatedReq) setRequest(updatedReq);
+      else await loadRequest();
+
+      onChanged?.(updatedReq || null);
     } catch (e) {
       setErr(getErrMsg(e));
     }
@@ -303,7 +293,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         return;
       }
 
-      await apiPost(
+      const res = await apiPost(
         `/requests/${requestId}/order`,
         { offerId },
         {
@@ -312,8 +302,11 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         },
       );
 
-      await loadRequest();
-      onChanged?.(null);
+      const updatedReq = res?.data?.request;
+      if (updatedReq) setRequest(updatedReq);
+      else await loadRequest();
+
+      onChanged?.(updatedReq || null);
     } catch (e) {
       setErr(getErrMsg(e));
     }
@@ -396,7 +389,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 onClick={sendToPO}
                 disabled={disabledSendToPO}
                 className="px-3 py-2 rounded-xl bg-indigo-500 text-black text-xs disabled:opacity-50"
-                title="PM: RECOMMENDED -> SENT_TO_PO"
                 type="button"
               >
                 Send to PO
@@ -408,7 +400,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 onClick={placeOrder}
                 disabled={disabledOrder}
                 className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs disabled:opacity-50"
-                title="PO: SENT_TO_PO -> ORDERED"
                 type="button"
               >
                 Place Order
@@ -475,12 +466,11 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                     </td>
 
                     <td className="px-3 py-2 text-right">
-                      {role === "RESOURCE_PLANNER" ? (
+                      {canRecommend ? (
                         <button
                           className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
                           onClick={() => recommend(oid)}
                           disabled={!oid || requestStatus !== "BID_EVALUATION"}
-                          title="RP: Recommend this offer"
                           type="button"
                         >
                           Recommend
@@ -516,7 +506,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 }
 
 /* =========================
-   RequestList
+   RequestList (FIXED parsing)
 ========================= */
 export default function RequestList({ view = "all" }) {
   const router = useRouter();
@@ -572,8 +562,9 @@ export default function RequestList({ view = "all" }) {
     const params = {};
     if (view === "my") params.view = "my";
     if (view === "review") params.status = "IN_REVIEW";
+    if (qDebounced) params.q = qDebounced; // ✅ backend supports q
     return params;
-  }, [view]);
+  }, [view, qDebounced]);
 
   const load = useCallback(
     async ({ isManual = false } = {}) => {
@@ -609,15 +600,22 @@ export default function RequestList({ view = "all" }) {
         const res = await fetchWithRetry(
           () =>
             apiGet("/requests", {
-              headers: { ...authHeaders },
+              headers: { ...authHeaders }, // ✅ no cache-control headers
               params: { ...params, _t: Date.now() },
               signal: ac.signal,
             }),
           { retries: 2, baseDelay: 450 },
         );
 
-        const data = Array.isArray(res?.data) ? res.data : [];
-        setList(data);
+        // ✅ FIX: backend returns {data, meta}
+        const payload = res?.data;
+        const rows = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+        setList(rows);
         setLastUpdatedAt(new Date());
       } catch (e) {
         if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
@@ -639,6 +637,7 @@ export default function RequestList({ view = "all" }) {
 
   const filtered = useMemo(() => {
     const query = (qDebounced || "").toLowerCase();
+
     return (list || []).filter((r) => {
       const s = String(r?.status || "").toUpperCase();
       const okStatus = statusFilter === "ALL" ? true : s === statusFilter;
@@ -688,6 +687,7 @@ export default function RequestList({ view = "all" }) {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
+
           <p className="text-[11px] text-slate-400">
             Total: <span className="text-slate-200">{filtered.length}</span>
             {lastUpdatedAt ? (
@@ -881,7 +881,8 @@ export default function RequestList({ view = "all" }) {
             setOffersOpen(false);
             setActiveReq(null);
           }}
-          onChanged={() => {
+          onChanged={(updatedReq) => {
+            if (updatedReq?._id) setActiveReq(updatedReq);
             load({ isManual: true });
           }}
         />
