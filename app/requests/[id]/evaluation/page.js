@@ -6,12 +6,16 @@ import toast from "react-hot-toast";
 import { AuthContext } from "../../../../context/AuthContext";
 import { apiGet, apiPost } from "../../../../lib/api";
 
+/* =========================
+   Utils
+========================= */
 function roleUpper(x) {
   return String(x || "")
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "_");
 }
+
 function idStr(x) {
   if (!x) return "";
   if (typeof x === "string") return x;
@@ -22,15 +26,88 @@ function idStr(x) {
     return "";
   }
 }
+
 function clamp0to10(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
   return Math.max(0, Math.min(10, v));
 }
+
 function fmtMoney(v, currency = "EUR") {
   const num = Number(v);
   if (!Number.isFinite(num)) return "—";
   return `${num.toLocaleString()} ${currency}`;
+}
+
+/* =========================
+   Offer Adapter (matches your offer JSON)
+   Your offer example uses:
+   - vendor.companyName
+   - vendor.vendorId / vendor.contactEmail
+   - commercials.costing.totalAfterDiscount
+   - commercials.currency
+   - scorecard.deliveryRisk
+========================= */
+function getProviderName(o) {
+  return (
+    o?.providerName || o?.vendor?.companyName || o?.vendor?.contactPerson || "—"
+  );
+}
+
+function getProviderUsername(o) {
+  return (
+    o?.providerUsername ||
+    o?.vendor?.vendorId ||
+    (o?.vendor?.contactEmail ? o.vendor.contactEmail.split("@")[0] : "") ||
+    ""
+  );
+}
+
+function getCurrency(o) {
+  return o?.currency || o?.commercials?.currency || "EUR";
+}
+
+function getPrice(o) {
+  if (o?.price != null) return o.price;
+
+  const costing = o?.commercials?.costing;
+  const v =
+    costing?.totalAfterDiscount ??
+    costing?.totalBeforeDiscount ??
+    costing?.total ??
+    null;
+
+  const num = Number(v);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getDeliveryRisk(o) {
+  const v = String(
+    o?.deliveryRisk || o?.scorecard?.deliveryRisk || "",
+  ).toUpperCase();
+  return v || "—";
+}
+
+function DeliveryRiskPill({ risk }) {
+  const r = String(risk || "—").toUpperCase();
+
+  const cls =
+    r === "LOW"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+      : r === "MEDIUM"
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+        : r === "HIGH"
+          ? "border-red-500/40 bg-red-500/10 text-red-200"
+          : "border-slate-700 bg-slate-900 text-slate-200";
+
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border ${cls}`}
+      title="Delivery risk (from offer.scorecard.deliveryRisk)"
+    >
+      {r}
+    </span>
+  );
 }
 
 export default function RPEvaluationPage() {
@@ -45,7 +122,6 @@ export default function RPEvaluationPage() {
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // evaluation doc from DB
   const [savedEval, setSavedEval] = useState(null);
 
   // weights
@@ -56,8 +132,8 @@ export default function RPEvaluationPage() {
   const [comment, setComment] = useState("");
   const [recommendedOfferId, setRecommendedOfferId] = useState("");
 
-  // offer scores local state (by offerId)
-  const [scores, setScores] = useState({}); // { offerId: {price, delivery, quality, notes} }
+  // { offerId: {price, delivery, quality, notes} }
+  const [scores, setScores] = useState({});
 
   const canUse = role === "RESOURCE_PLANNER";
   const status = useMemo(() => roleUpper(reqDoc?.status), [reqDoc?.status]);
@@ -80,24 +156,24 @@ export default function RPEvaluationPage() {
   const ranked = useMemo(() => {
     const rows = (offers || []).map((o) => {
       const oid = idStr(o?._id);
-      return {
-        offer: o,
-        offerId: oid,
-        total: computeTotalScore(oid),
-      };
+      return { offer: o, offerId: oid, total: computeTotalScore(oid) };
     });
     rows.sort((a, b) => b.total - a.total);
     return rows;
   }, [offers, scores, wPrice, wDelivery, wQuality]);
 
   async function loadAll() {
+    if (!requestId) return;
     setLoading(true);
+
     try {
+      // ✅ offers endpoint in your backend:
+      // GET /api/offers/by-request/:requestId
       const [reqRes, offersRes, evalRes] = await Promise.all([
         apiGet(`/requests/${encodeURIComponent(requestId)}`, {
           headers: authHeaders,
         }),
-        apiGet(`/offers?requestId=${encodeURIComponent(requestId)}`, {
+        apiGet(`/offers/by-request/${encodeURIComponent(requestId)}`, {
           headers: authHeaders,
         }),
         apiGet(`/rp-evaluations/${encodeURIComponent(requestId)}`, {
@@ -106,21 +182,25 @@ export default function RPEvaluationPage() {
       ]);
 
       const r = reqRes?.data || null;
-      const list = Array.isArray(offersRes?.data)
-        ? offersRes.data
-        : offersRes?.data?.data || [];
+
+      // backend returns { data: offers }
+      const list = Array.isArray(offersRes?.data?.data)
+        ? offersRes.data.data
+        : [];
+
       const ev = evalRes?.data || null;
 
       setReqDoc(r);
       setOffers(list);
       setSavedEval(ev);
 
-      // hydrate from saved evaluation if exists
+      // hydrate from saved evaluation
       if (ev?.weights) {
         setWPrice(Number(ev.weights.price ?? 0.6));
         setWDelivery(Number(ev.weights.delivery ?? 0.25));
         setWQuality(Number(ev.weights.quality ?? 0.15));
       }
+
       if (typeof ev?.comment === "string") setComment(ev.comment);
       if (ev?.recommendedOfferId)
         setRecommendedOfferId(String(ev.recommendedOfferId));
@@ -139,7 +219,7 @@ export default function RPEvaluationPage() {
         }
         setScores(next);
       } else {
-        // initialize empty scores for all offers
+        // init empty scores for offers
         const next = {};
         for (const o of list) {
           const oid = idStr(o?._id);
@@ -148,14 +228,15 @@ export default function RPEvaluationPage() {
         setScores(next);
       }
     } catch (e) {
-      toast.error(e?.response?.data?.error || "Failed to load evaluation data");
+      toast.error(
+        e?.response?.data?.error || e?.message || "Failed to load data",
+      );
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!requestId) return;
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
@@ -172,10 +253,22 @@ export default function RPEvaluationPage() {
           const s = scores[oid] || {};
           return {
             offerId: oid,
-            providerUsername: o?.providerUsername || "",
-            price: o?.price ?? null,
-            currency: o?.currency || "EUR",
+
+            // store normalized vendor identity for reporting
+            providerUsername: getProviderUsername(o) || "",
+            providerName: getProviderName(o) || "",
+
+            // store normalized commercial fields
+            price: getPrice(o),
+            currency: getCurrency(o),
+
+            // you asked for deliveryRisk
+            deliveryRisk: getDeliveryRisk(o),
+
+            // your current offers may not have deliveryDays; keep if you add later
             deliveryDays: o?.deliveryDays ?? null,
+
+            // RP scoring
             scorePrice: clamp0to10(s.price),
             scoreDelivery: clamp0to10(s.delivery),
             scoreQuality: clamp0to10(s.quality),
@@ -188,11 +281,13 @@ export default function RPEvaluationPage() {
       const res = await apiPost(`/rp-evaluations/${requestId}`, payload, {
         headers: authHeaders,
       });
-      setSavedEval(res?.data?.data || null);
 
+      setSavedEval(res?.data?.data || null);
       toast.success("Evaluation saved", { id: t });
     } catch (e) {
-      toast.error(e?.response?.data?.error || "Save failed", { id: t });
+      toast.error(e?.response?.data?.error || e?.message || "Save failed", {
+        id: t,
+      });
     }
   }
 
@@ -202,7 +297,7 @@ export default function RPEvaluationPage() {
       return;
     }
 
-    // save evaluation first (enterprise)
+    // Save evaluation first
     await saveEvaluation();
 
     const t = toast.loading("Recommending offer...");
@@ -216,10 +311,14 @@ export default function RPEvaluationPage() {
       toast.success("Offer recommended! Request is now RECOMMENDED.", {
         id: t,
       });
+
       await loadAll();
       router.push(`/requests/${requestId}`);
     } catch (e) {
-      toast.error(e?.response?.data?.error || "Recommend failed", { id: t });
+      toast.error(
+        e?.response?.data?.error || e?.message || "Recommend failed",
+        { id: t },
+      );
     }
   }
 
@@ -248,16 +347,19 @@ export default function RPEvaluationPage() {
             <h1 className="text-lg font-semibold text-slate-100">
               RP Evaluation
             </h1>
+
             <p className="text-xs text-slate-400 mt-1">
               Request:{" "}
               <span className="text-slate-200">
                 {reqDoc?.title || "Untitled"}
               </span>
             </p>
+
             <p className="text-xs text-slate-500">
               Status: <span className="text-slate-200">{status || "—"}</span> ·
               ID: <span className="text-slate-300">{requestId}</span>
             </p>
+
             {status !== "BID_EVALUATION" && (
               <p className="text-xs text-amber-300 mt-2">
                 This request is not in BID_EVALUATION. You can still review, but
@@ -274,6 +376,7 @@ export default function RPEvaluationPage() {
             >
               Refresh
             </button>
+
             <button
               onClick={saveEvaluation}
               className="px-3 py-2 rounded-xl bg-sky-500 text-black text-xs font-semibold hover:bg-sky-400"
@@ -281,6 +384,7 @@ export default function RPEvaluationPage() {
             >
               Save Evaluation
             </button>
+
             <button
               onClick={recommendNow}
               disabled={!recommendedOfferId || status !== "BID_EVALUATION"}
@@ -336,7 +440,7 @@ export default function RPEvaluationPage() {
         )}
       </div>
 
-      {/* Ranking table */}
+      {/* Ranking */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between bg-slate-950/50">
           <p className="text-sm font-semibold text-slate-100">Offers Ranking</p>
@@ -346,13 +450,13 @@ export default function RPEvaluationPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-[1100px] w-full text-sm">
+          <table className="min-w-[1200px] w-full text-sm">
             <thead className="bg-slate-950/50 text-[11px] text-slate-400">
               <tr>
                 <th className="px-3 py-2 text-left">Choose</th>
                 <th className="px-3 py-2 text-left">Provider</th>
                 <th className="px-3 py-2 text-left">Price</th>
-                <th className="px-3 py-2 text-left">Delivery</th>
+                <th className="px-3 py-2 text-left">Delivery Risk</th>
                 <th className="px-3 py-2 text-left">Score (0-10)</th>
                 <th className="px-3 py-2 text-left">Notes</th>
                 <th className="px-3 py-2 text-left">Total</th>
@@ -367,9 +471,18 @@ export default function RPEvaluationPage() {
                   quality: 0,
                   notes: "",
                 };
+
                 const isRec =
                   recommendedOfferId &&
                   String(recommendedOfferId) === String(offerId);
+
+                const providerName = getProviderName(offer);
+                const providerUsername = getProviderUsername(offer);
+
+                const price = getPrice(offer);
+                const currency = getCurrency(offer);
+
+                const risk = getDeliveryRisk(offer);
 
                 return (
                   <tr
@@ -386,27 +499,23 @@ export default function RPEvaluationPage() {
                     </td>
 
                     <td className="px-3 py-2 text-slate-100">
-                      {offer?.providerName || offer?.providerUsername || "—"}
+                      {providerName}
                       {isRec && (
                         <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-200">
                           Recommended
                         </span>
                       )}
                       <div className="text-[11px] text-slate-500">
-                        {offer?.providerUsername
-                          ? `@${offer.providerUsername}`
-                          : ""}
+                        {providerUsername ? `@${providerUsername}` : ""}
                       </div>
                     </td>
 
                     <td className="px-3 py-2 text-slate-300">
-                      {offer?.price != null
-                        ? fmtMoney(offer.price, offer.currency)
-                        : "—"}
+                      {price != null ? fmtMoney(price, currency) : "—"}
                     </td>
 
-                    <td className="px-3 py-2 text-slate-300">
-                      {offer?.deliveryDays ?? "—"} days
+                    <td className="px-3 py-2">
+                      <DeliveryRiskPill risk={risk} />
                     </td>
 
                     <td className="px-3 py-2">
@@ -417,7 +526,7 @@ export default function RPEvaluationPage() {
                           onChange={(v) =>
                             setScores((prev) => ({
                               ...prev,
-                              [offerId]: { ...prev[offerId], price: v },
+                              [offerId]: { ...(prev[offerId] || {}), price: v },
                             }))
                           }
                         />
@@ -427,7 +536,10 @@ export default function RPEvaluationPage() {
                           onChange={(v) =>
                             setScores((prev) => ({
                               ...prev,
-                              [offerId]: { ...prev[offerId], delivery: v },
+                              [offerId]: {
+                                ...(prev[offerId] || {}),
+                                delivery: v,
+                              },
                             }))
                           }
                         />
@@ -437,7 +549,10 @@ export default function RPEvaluationPage() {
                           onChange={(v) =>
                             setScores((prev) => ({
                               ...prev,
-                              [offerId]: { ...prev[offerId], quality: v },
+                              [offerId]: {
+                                ...(prev[offerId] || {}),
+                                quality: v,
+                              },
                             }))
                           }
                         />
@@ -451,7 +566,7 @@ export default function RPEvaluationPage() {
                           setScores((prev) => ({
                             ...prev,
                             [offerId]: {
-                              ...prev[offerId],
+                              ...(prev[offerId] || {}),
                               notes: e.target.value,
                             },
                           }))
@@ -480,19 +595,21 @@ export default function RPEvaluationPage() {
         </div>
 
         <div className="px-4 py-3 text-[11px] text-slate-500 bg-slate-950/40">
-          This page saves evaluation in{" "}
-          <span className="text-slate-300">rp_evaluations</span> and recommends
-          using your existing endpoint{" "}
+          Uses:{" "}
           <span className="text-slate-300">
-            POST /api/requests/:id/rp-recommend-offer
-          </span>
-          .
+            GET /api/offers/by-request/:requestId
+          </span>{" "}
+          and{" "}
+          <span className="text-slate-300">/api/rp-evaluations/:requestId</span>
         </div>
       </div>
     </div>
   );
 }
 
+/* =========================
+   UI bits
+========================= */
 function WeightCard({ label, value, onChange }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-950 p-3">
