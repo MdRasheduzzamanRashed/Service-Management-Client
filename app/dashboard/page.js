@@ -8,7 +8,6 @@ import DashboardContractsCard from "../../components/DashboardContractsCard";
 import DashboardRequestsCard from "../../components/DashboardRequestsCard";
 
 import RequestList from "../../components/RequestList";
-import ProjectsExplorer from "../projects/ProjectsExplorer";
 import MyOrdersPage from "../orders/page";
 import Projects from "../projects/page";
 
@@ -32,13 +31,16 @@ function DashboardContent() {
 
   if (loading) {
     return (
-      <main className="p-6 text-sm text-slate-300">Loading dashboard…</main>
+      <main className="p-4 sm:p-6 text-sm text-slate-300">
+        Loading dashboard…
+      </main>
     );
   }
 
   return (
-    <main className="space-y-6 p-4">
-      <section className="flex justify-center gap-4 items-center">
+    <main className="space-y-6 p-3 sm:p-4 lg:p-6">
+      {/* ✅ Top summary cards (responsive grid) */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <DashboardProjectsCard />
         <DashboardContractsCard />
         <DashboardRequestsCard variant="my" />
@@ -46,51 +48,102 @@ function DashboardContent() {
       </section>
 
       <section className="space-y-6">
+        {/* PM/Admin */}
         {(isPM || canSeeAll) && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h2 className="text-sm font-semibold text-slate-100">
                   Requests
                 </h2>
+
                 <a
                   href="/requests"
-                  className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800"
+                  className="w-full sm:w-auto text-center text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
                 >
                   Open All Requests
+                </a>
+              </div>
+
+              <div className="mt-3">
+                <RequestList view="all" />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <Projects />
+            </div>
+          </div>
+        )}
+
+        {/* RP/Admin (but not PM) */}
+        {(isRP || canSeeAll) && !isPM && (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Requests In Review
+                </h2>
+                <a
+                  href="/requests?status=IN_REVIEW"
+                  className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                >
+                  Open
+                </a>
+              </div>
+              <div className="mt-3">
+                <RequestList view="review" />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-100">
+                  All Requests
+                </h2>
+                <a
+                  href="/requests"
+                  className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                >
+                  Open
                 </a>
               </div>
               <div className="mt-3">
                 <RequestList view="all" />
               </div>
             </div>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-              <Projects></Projects>
-            </div>
           </div>
         )}
 
-        {(isRP || canSeeAll) && !isPM && (
-          <div className="space-y-4">
-            <div className="mt-3">
-              <RequestList view="review" />
-            </div>
-            <div className="mt-3">
-              <RequestList view="all" />
-            </div>
-          </div>
-        )}
-
+        {/* PO/Admin (but not PM/RP) */}
         {(isPO || canSeeAll) && !isPM && !isRP && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-4">
-            <MyOrdersPage />
-            <RequestList view="all" />
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <MyOrdersPage />
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-100">
+                  All Requests
+                </h2>
+                <a
+                  href="/requests"
+                  className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                >
+                  Open
+                </a>
+              </div>
+              <div className="mt-3">
+                <RequestList view="all" />
+              </div>
+            </div>
           </div>
         )}
 
+        {/* Admin note */}
         {canSeeAll && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
             <h2 className="text-sm font-semibold text-slate-100">
               System Admin Note
             </h2>
@@ -108,7 +161,9 @@ function DashboardContent() {
 export default function Dashboard() {
   return (
     <Suspense
-      fallback={<main className="p-6 text-sm text-slate-300">Loading…</main>}
+      fallback={
+        <main className="p-4 sm:p-6 text-sm text-slate-300">Loading…</main>
+      }
     >
       <DashboardContent />
     </Suspense>
