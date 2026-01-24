@@ -425,88 +425,99 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
         )}
 
-        <div className="overflow-x-auto rounded-xl border border-slate-800">
-          <table className="min-w-[900px] w-full text-sm">
-            <thead className="bg-slate-950/60 text-[11px] text-slate-400">
-              <tr>
-                <th className="px-3 py-2 text-left">Company Name</th>
-                <th className="px-3 py-2 text-center">For</th>
-                <th className="px-3 py-2 text-center">Delivery Risk</th>
-                <th className="px-3 py-2 text-center">Technical Score</th>
-                <th className="px-3 py-2 text-center">Commercial Score</th>{" "}
-                <th className="px-3 py-2 text-center">Overall Score</th>
-              </tr>
-            </thead>
+        {/* =========================
+   Offers: Card Grid (all devices)
+========================= */}
+        {!loadingOffers && (!offers || offers.length === 0) && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
+            No offers found for this request.
+          </div>
+        )}
 
-            <tbody>
-              {(offers || []).map((o) => {
-                const oid = normalizeId(o?._id);
-                const isRec = recommendedOfferId && oid === recommendedOfferId;
+        {loadingOffers && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
+            Loading offers...
+          </div>
+        )}
 
-                return (
-                  <tr
-                    key={
-                      oid ||
-                      `${o?.vendor?.companyName}-${o?.roles.length}-${o?.scorecard?.deliveryRisk}-${o?.scorecard?.technicalScore}-${o?.scorecard?.commercialScore}-${o?.scorecard?.overallScore}`
-                    }
-                    className="border-t border-slate-800 hover:bg-slate-950/30"
-                  >
-                    <td className="px-3 py-2 text-slate-100">
-                      {o?.vendor?.companyName || "—"}
-                      {isRec ? (
-                        <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border border-teal-700/40 bg-teal-950/30 text-teal-200">
-                          Recommended
+        {!!offers?.length && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {(offers || []).map((o) => {
+              const oid = normalizeId(o?._id);
+              const isRec = recommendedOfferId && oid === recommendedOfferId;
+
+              return (
+                <div
+                  key={
+                    oid ||
+                    `${o?.vendor?.companyName}-${o?.roles.length}-${o?.scorecard?.deliveryRisk}-${o?.scorecard?.technicalScore}-${o?.scorecard?.commercialScore}-${o?.scorecard?.overallScore}`
+                  }
+                  className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 transition"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-100 truncate">
+                        {o?.vendor?.companyName || "—"}
+                      </p>
+
+                      <p className="text-[11px] text-slate-500 mt-0.5 break-words">
+                        Offer ID:{" "}
+                        <span className="text-slate-300 break-all">
+                          {oid || "—"}
                         </span>
-                      ) : null}
-                    </td>
+                      </p>
+                    </div>
 
-                    <td className="px-3 py-2 text-slate-300  text-center">
-                      {o?.roles.length || "—"}
-                    </td>
+                    {isRec ? (
+                      <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full border border-teal-700/40 bg-teal-950/30 text-teal-200">
+                        Recommended
+                      </span>
+                    ) : null}
+                  </div>
 
-                    <td className="px-3 py-2 text-slate-300  text-center">
-                      {o?.scorecard?.deliveryRisk ?? "—"}
-                    </td>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-[10px] text-slate-500">For</p>
+                      <p className="text-xs text-slate-200">
+                        {o?.roles.length || "—"}
+                      </p>
+                    </div>
 
-                    <td className="px-3 py-2 text-slate-300  text-center">
-                      {o?.scorecard?.technicalScore || "—"}
-                    </td>
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-[10px] text-slate-500">
+                        Delivery Risk
+                      </p>
+                      <p className="text-xs text-slate-200">
+                        {o?.scorecard?.deliveryRisk ?? "—"}
+                      </p>
+                    </div>
 
-                    <td className="px-3 py-2 text-slate-300  text-center">
-                      {o?.scorecard?.commercialScore || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-300 text-center">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-[10px] text-slate-500">Technical</p>
+                      <p className="text-xs text-slate-200">
+                        {o?.scorecard?.technicalScore || "—"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-[10px] text-slate-500">Commercial</p>
+                      <p className="text-xs text-slate-200">
+                        {o?.scorecard?.commercialScore || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3 flex items-center justify-between">
+                    <p className="text-[11px] text-slate-500">Overall Score</p>
+                    <p className="text-sm font-semibold text-slate-100">
                       {o?.scorecard?.overallScore || "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {!loadingOffers && (!offers || offers.length === 0) && (
-                <tr>
-                  <td
-                    colSpan={canRecommend ? 6 : 5}
-                    className="px-3 py-6 text-xs text-slate-400"
-                  >
-                    No offers found for this request.
-                  </td>
-                </tr>
-              )}
-
-              {loadingOffers && (
-                <tr>
-                  <td
-                    colSpan={canRecommend ? 6 : 5}
-                    className="px-3 py-6 text-xs text-slate-400"
-                  >
-                    Loading offers...
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -760,133 +771,132 @@ export default function RequestList({ view = "all" }) {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-800">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-950/60">
-            <tr className="text-center text-slate-400">
-              <th className="px-3 py-2 text-left">Title</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Type</th>
-              <th className="px-3 py-2">Project</th>
-              <th className="px-3 py-2">Supplier</th>
-              <th className="px-3 py-2">Created By</th>
-              <th className="px-3 py-2">Created</th>
-              <th className="px-3 py-2 text-right">Action</th>
-            </tr>
-          </thead>
+      {/* =========================
+   Requests: Card Grid (all devices)
+========================= */}
+      {!loading && (!filtered || filtered.length === 0) && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
+          No requests found.
+        </div>
+      )}
 
-          <tbody>
-            {(filtered || []).map((r) => {
-              const id = normalizeId(r._id || r.id);
-              const status = String(r?.status || "").toUpperCase();
-              const createdBy = normalizeUsername(r?.createdBy);
+      {loading && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
+          Loading requests...
+        </div>
+      )}
 
-              const owner =
-                isPM &&
-                headerUsername &&
-                createdBy &&
-                headerUsername === createdBy;
-              const canEdit = owner && status === "DRAFT";
+      {!!filtered?.length && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {(filtered || []).map((r) => {
+            const id = normalizeId(r._id || r.id);
+            const status = String(r?.status || "").toUpperCase();
+            const createdBy = normalizeUsername(r?.createdBy);
 
-              return (
-                <tr
-                  key={id || `${r?.title}-${r?.createdAt}`}
-                  className="border-t border-slate-800 hover:bg-slate-950/30 cursor-pointer"
-                  onClick={() => id && router.push(`/requests/${id}`)}
-                >
-                  <td className="px-3 py-2 text-slate-100 max-w-[360px] truncate">
-                    {r.title || "Untitled"}
-                  </td>
+            const owner =
+              isPM &&
+              headerUsername &&
+              createdBy &&
+              headerUsername === createdBy;
+            const canEdit = owner && status === "DRAFT";
 
-                  <td className="px-3 py-2 text-center">
-                    <StatusBadge status={status} />
-                  </td>
+            return (
+              <div
+                key={id || `${r?.title}-${r?.createdAt}`}
+                className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 transition cursor-pointer"
+                onClick={() => id && router.push(`/requests/${id}`)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-100 truncate">
+                      {r.title || "Untitled"}
+                    </p>
 
-                  <td className="px-3 py-2 text-slate-300 text-center">
-                    {r.type || "—"}
-                  </td>
-
-                  <td className="px-3 py-2 text-slate-300 text-center">
-                    {r.projectId ? `${r.projectId}` : r.projectName || "—"}
-                  </td>
-
-                  <td className="px-3 py-2 text-slate-300 text-center">
-                    {r.contractSupplier || "—"}
-                  </td>
-
-                  <td className="px-3 py-2 text-slate-300 text-center">
-                    {r.createdBy || "—"}
-                  </td>
-
-                  <td className="px-3 py-2 text-slate-300 text-center">
-                    {fmtDate(r.createdAt)}
-                  </td>
-
-                  <td className="px-3 py-2 text-right">
-                    <div
-                      className="flex flex-wrap justify-end gap-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800"
-                        onClick={() => {
-                          setActiveReq(r);
-                          setOffersOpen(true);
-                        }}
-                      >
-                        Offers
-                      </button>
-
-                      <Link
-                        href={id ? `/requests/${id}` : "/requests"}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800"
-                      >
-                        View
-                      </Link>
-
-                      {role === "RESOURCE_PLANNER" &&
-                        status === "BID_EVALUATION" && (
-                          <Link
-                            href={`/requests/${id}/evaluation`}
-                            className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
-                          >
-                            Evaluate
-                          </Link>
-                        )}
-
-                      {canEdit && (
-                        <Link
-                          href={`/requests/${id}/edit`}
-                          className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-black hover:bg-emerald-400"
-                        >
-                          Edit
-                        </Link>
-                      )}
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <StatusBadge status={status} />
+                      <span className="text-[11px] text-slate-500">
+                        {r.type || "—"}
+                      </span>
                     </div>
-                  </td>
-                </tr>
-              );
-            })}
+                  </div>
 
-            {!loading && (!filtered || filtered.length === 0) && (
-              <tr>
-                <td className="px-3 py-6 text-slate-400 text-xs" colSpan={8}>
-                  No requests found.
-                </td>
-              </tr>
-            )}
+                  <div className="text-right">
+                    <p className="text-[11px] text-slate-500">Created</p>
+                    <p className="text-xs text-slate-200">
+                      {fmtDate(r.createdAt)}
+                    </p>
+                  </div>
+                </div>
 
-            {loading && (
-              <tr>
-                <td className="px-3 py-6 text-slate-400 text-xs" colSpan={8}>
-                  Loading requests...
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                    <p className="text-[10px] text-slate-500">Project</p>
+                    <p className="text-xs text-slate-200 truncate">
+                      {r.projectId ? `${r.projectId}` : r.projectName || "—"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                    <p className="text-[10px] text-slate-500">Supplier</p>
+                    <p className="text-xs text-slate-200 truncate">
+                      {r.contractSupplier || "—"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 col-span-2">
+                    <p className="text-[10px] text-slate-500">Created By</p>
+                    <p className="text-xs text-slate-200 truncate">
+                      {r.createdBy || "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className="mt-4 flex flex-wrap gap-2 justify-end"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                    onClick={() => {
+                      setActiveReq(r);
+                      setOffersOpen(true);
+                    }}
+                  >
+                    Offers
+                  </button>
+
+                  <Link
+                    href={id ? `/requests/${id}` : "/requests"}
+                    className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                  >
+                    View
+                  </Link>
+
+                  {role === "RESOURCE_PLANNER" &&
+                    status === "BID_EVALUATION" && (
+                      <Link
+                        href={`/requests/${id}/evaluation`}
+                        className="text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400"
+                      >
+                        Evaluate
+                      </Link>
+                    )}
+
+                  {canEdit && (
+                    <Link
+                      href={`/requests/${id}/edit`}
+                      className="text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400"
+                    >
+                      Edit
+                    </Link>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {offersOpen && activeReq && (
         <OffersModal
