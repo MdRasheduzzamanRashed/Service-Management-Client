@@ -119,90 +119,12 @@ function StatusBadge({ status }) {
 }
 
 /* =========================
-   UI: Skeletons (UI only)
-========================= */
-function SkeletonLine({ w = "w-full" }) {
-  return <div className={`h-3 ${w} rounded bg-slate-800/70 animate-pulse`} />;
-}
-
-function RequestCardSkeleton() {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 space-y-2">
-          <SkeletonLine w="w-3/4" />
-          <SkeletonLine w="w-1/3" />
-        </div>
-        <div className="w-20 space-y-2">
-          <SkeletonLine w="w-full" />
-          <SkeletonLine w="w-3/4" />
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-full" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-full" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 col-span-2 space-y-2">
-          <SkeletonLine w="w-1/3" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2 justify-end">
-        <div className="h-9 w-20 rounded-xl bg-slate-800/70 animate-pulse" />
-        <div className="h-9 w-20 rounded-xl bg-slate-800/70 animate-pulse" />
-        <div className="h-9 w-24 rounded-xl bg-slate-800/70 animate-pulse" />
-      </div>
-    </div>
-  );
-}
-
-function OfferCardSkeleton() {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 space-y-2">
-          <SkeletonLine w="w-3/4" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="h-5 w-20 rounded-full bg-slate-800/70 animate-pulse" />
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-      </div>
-
-      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3 flex items-center justify-between">
-        <SkeletonLine w="w-1/3" />
-        <SkeletonLine w="w-16" />
-      </div>
-    </div>
-  );
-}
-
-/* =========================
    Offers Modal
+   ✅ FIXED:
+   - requestId memo depends on reqDoc?._id (not whole object)
+   - offers response parsing supports array OR {data: []}
+   - Action column REMOVED
+   - Evaluate button uses requestStatus + requestId (correct)
 ========================= */
 function scoreOffer(o) {
   const price = Number(o?.price ?? 1e12);
@@ -230,6 +152,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     [request?.recommendedOfferId],
   );
 
+  const canRecommend = role === "RESOURCE_PLANNER";
   const canSendToPO = role === "PROJECT_MANAGER";
   const canOrder = role === "PROCUREMENT_OFFICER";
 
@@ -298,6 +221,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         { retries: 2, baseDelay: 450 },
       );
 
+      // ✅ robust parse (array OR {data: []})
       const payload = res?.data;
       const rows = Array.isArray(payload)
         ? payload
@@ -325,6 +249,33 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       reqAbortRef.current?.abort();
     };
   }, [reqDoc, loadOffers, loadRequest]);
+
+  async function recommend(offerId) {
+    try {
+      setErr("");
+      const res = await apiPost(
+        `/requests/${encodeURIComponent(requestId)}/rp-recommend-offer`,
+        { offerId },
+        {
+          headers: { ...authHeaders },
+          params: { _t: Date.now() },
+        },
+      );
+
+      const updatedReq = res?.data?.request;
+      const updatedOffers = res?.data?.offers;
+
+      if (updatedReq) setRequest(updatedReq);
+      if (Array.isArray(updatedOffers)) setOffers(updatedOffers);
+
+      if (!updatedReq) await loadRequest();
+      if (!Array.isArray(updatedOffers)) await loadOffers();
+
+      onChanged?.(updatedReq || null);
+    } catch (e) {
+      setErr(getErrMsg(e));
+    }
+  }
 
   async function sendToPO() {
     try {
@@ -378,55 +329,49 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2 sm:p-4">
-      <div className="w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950 p-3 sm:p-4 space-y-4 max-h-[92vh] overflow-y-auto">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-slate-100 flex flex-wrap items-center gap-2">
-              <span>Offers</span>
-              <StatusBadge status={requestStatus} />
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+      <div className="w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+              Offers <StatusBadge status={requestStatus} />
               {(loadingReq || loadingOffers) && (
                 <span className="text-[11px] text-slate-400">(syncing…)</span>
               )}
             </h3>
 
-            <p className="text-xs text-slate-400 mt-1 break-words">
+            <p className="text-xs text-slate-400">
               {request?.title || "Untitled"} ·{" "}
               <span className="text-slate-300">Request ID:</span>{" "}
-              <span className="text-slate-200 break-all">
-                {requestId || "—"}
-              </span>
+              <span className="text-slate-200">{requestId || "—"}</span>
             </p>
 
-            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-              <span className="rounded-full border border-slate-800 bg-slate-950/40 px-2 py-1">
-                Total: <span className="text-slate-200">{offers.length}</span>
-              </span>
-
+            <p className="text-[11px] text-slate-500 mt-1">
+              Total offers:{" "}
+              <span className="text-slate-200">{offers.length}</span>
               {request?.maxOffers ? (
-                <span className="rounded-full border border-slate-800 bg-slate-950/40 px-2 py-1">
-                  MaxOffers:{" "}
+                <>
+                  {" "}
+                  / MaxOffers:{" "}
                   <span className="text-slate-200">{request.maxOffers}</span>
-                </span>
+                </>
               ) : null}
+            </p>
 
-              {recommendedOfferId ? (
-                <span className="rounded-full border border-slate-800 bg-slate-950/40 px-2 py-1">
-                  Recommended:{" "}
-                  <span className="text-slate-200 break-all">
-                    {recommendedOfferId}
-                  </span>
-                </span>
-              ) : null}
-            </div>
+            {recommendedOfferId && (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Recommended Offer ID:{" "}
+                <span className="text-slate-200">{recommendedOfferId}</span>
+              </p>
+            )}
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="flex items-center gap-2">
             {canSendToPO && (
               <button
                 onClick={sendToPO}
                 disabled={disabledSendToPO}
-                className="w-full sm:w-auto px-3 py-2 rounded-xl bg-indigo-500 text-black text-xs font-semibold disabled:opacity-50 active:scale-[0.99]"
+                className="px-3 py-2 rounded-xl bg-indigo-500 text-black text-xs disabled:opacity-50"
                 type="button"
               >
                 Send to PO
@@ -437,7 +382,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
               <button
                 onClick={placeOrder}
                 disabled={disabledOrder}
-                className="w-full sm:w-auto px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold disabled:opacity-50 active:scale-[0.99]"
+                className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs disabled:opacity-50"
                 type="button"
               >
                 Place Order
@@ -447,7 +392,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
             {canEvaluate ? (
               <Link
                 href={`/requests/${encodeURIComponent(requestId)}/evaluation`}
-                className="w-full sm:w-auto text-center px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400 active:scale-[0.99]"
+                className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400"
               >
                 Evaluate
               </Link>
@@ -458,7 +403,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 loadRequest();
                 loadOffers();
               }}
-              className="w-full sm:w-auto px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800 active:scale-[0.99]"
+              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
               type="button"
             >
               Refresh
@@ -466,7 +411,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
             <button
               onClick={onClose}
-              className="w-full sm:w-auto px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800 active:scale-[0.99]"
+              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
               type="button"
             >
               Close
@@ -480,24 +425,22 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
         )}
 
-        {/* Offers: Skeletons */}
-        {loadingOffers && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <OfferCardSkeleton key={i} />
-            ))}
-          </div>
-        )}
-
-        {/* Offers: Empty */}
+        {/* =========================
+   Offers: Card Grid (all devices)
+========================= */}
         {!loadingOffers && (!offers || offers.length === 0) && (
           <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
             No offers found for this request.
           </div>
         )}
 
-        {/* Offers: Cards */}
-        {!loadingOffers && !!offers?.length && (
+        {loadingOffers && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
+            Loading offers...
+          </div>
+        )}
+
+        {!!offers?.length && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {(offers || []).map((o) => {
               const oid = normalizeId(o?._id);
@@ -509,7 +452,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                     oid ||
                     `${o?.vendor?.companyName}-${o?.roles.length}-${o?.scorecard?.deliveryRisk}-${o?.scorecard?.technicalScore}-${o?.scorecard?.commercialScore}-${o?.scorecard?.overallScore}`
                   }
-                  className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 hover:border-slate-700 transition"
+                  className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 transition"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -581,7 +524,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 }
 
 /* =========================
-   RequestList
+   RequestList (unchanged)
 ========================= */
 export default function RequestList({ view = "all" }) {
   const router = useRouter();
@@ -757,9 +700,9 @@ export default function RequestList({ view = "all" }) {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4 space-y-4">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="min-w-0">
+        <div>
           <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
 
           <p className="text-[11px] text-slate-400">
@@ -776,37 +719,25 @@ export default function RequestList({ view = "all" }) {
           </p>
 
           {view === "my" && isPM && (
-            <p className="text-[11px] text-slate-500 break-words">
+            <p className="text-[11px] text-slate-500">
               Username:{" "}
               <span className="text-slate-300">{headerUsername || "—"}</span>
             </p>
           )}
         </div>
 
-        {/* Controls (UI only) */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-          <div className="relative w-full sm:w-80">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search title, project, supplier, createdBy..."
-              className="w-full border border-slate-700 rounded-xl pl-3 pr-20 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
-            />
-            {q?.trim() ? (
-              <button
-                type="button"
-                onClick={() => setQ("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] px-2 py-1 rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 active:scale-[0.99]"
-              >
-                Clear
-              </button>
-            ) : null}
-          </div>
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search title, project, supplier, createdBy..."
+            className="w-full sm:w-72 border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
+          />
 
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full sm:w-auto border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
+            className="border border-slate-700 rounded-xl px-3 py-2 bg-slate-950 text-sm focus:outline-none focus:border-emerald-400"
           >
             <option value="ALL">All Status</option>
             <option value="DRAFT">DRAFT</option>
@@ -827,7 +758,7 @@ export default function RequestList({ view = "all" }) {
             type="button"
             onClick={() => load({ isManual: true })}
             disabled={loading || refreshing}
-            className="w-full sm:w-auto px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60 active:scale-[0.99]"
+            className="px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
           >
             {refreshing ? "Refreshing..." : loading ? "Loading..." : "Refresh"}
           </button>
@@ -840,24 +771,22 @@ export default function RequestList({ view = "all" }) {
         </div>
       )}
 
-      {/* Requests: Skeletons */}
-      {loading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <RequestCardSkeleton key={i} />
-          ))}
-        </div>
-      )}
-
-      {/* Requests: Empty */}
+      {/* =========================
+   Requests: Card Grid (all devices)
+========================= */}
       {!loading && (!filtered || filtered.length === 0) && (
         <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
           No requests found.
         </div>
       )}
 
-      {/* Requests: Cards */}
-      {!loading && !!filtered?.length && (
+      {loading && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
+          Loading requests...
+        </div>
+      )}
+
+      {!!filtered?.length && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {(filtered || []).map((r) => {
             const id = normalizeId(r._id || r.id);
@@ -874,7 +803,7 @@ export default function RequestList({ view = "all" }) {
             return (
               <div
                 key={id || `${r?.title}-${r?.createdAt}`}
-                className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 hover:border-slate-700 transition cursor-pointer"
+                className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 transition cursor-pointer"
                 onClick={() => id && router.push(`/requests/${id}`)}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -891,7 +820,7 @@ export default function RequestList({ view = "all" }) {
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
+                  <div className="text-right">
                     <p className="text-[11px] text-slate-500">Created</p>
                     <p className="text-xs text-slate-200">
                       {fmtDate(r.createdAt)}
@@ -928,7 +857,7 @@ export default function RequestList({ view = "all" }) {
                 >
                   <button
                     type="button"
-                    className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 active:scale-[0.99]"
+                    className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
                     onClick={() => {
                       setActiveReq(r);
                       setOffersOpen(true);
@@ -939,7 +868,7 @@ export default function RequestList({ view = "all" }) {
 
                   <Link
                     href={id ? `/requests/${id}` : "/requests"}
-                    className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 active:scale-[0.99]"
+                    className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
                   >
                     View
                   </Link>
@@ -948,7 +877,7 @@ export default function RequestList({ view = "all" }) {
                     status === "BID_EVALUATION" && (
                       <Link
                         href={`/requests/${id}/evaluation`}
-                        className="text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400 active:scale-[0.99]"
+                        className="text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400"
                       >
                         Evaluate
                       </Link>
@@ -957,7 +886,7 @@ export default function RequestList({ view = "all" }) {
                   {canEdit && (
                     <Link
                       href={`/requests/${id}/edit`}
-                      className="text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400 active:scale-[0.99]"
+                      className="text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400"
                     >
                       Edit
                     </Link>
