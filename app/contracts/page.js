@@ -19,7 +19,6 @@ function toDateText(v) {
 
 function isIsoDateString(v) {
   if (typeof v !== "string") return false;
-  // simple ISO check
   return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$/.test(
     v,
   );
@@ -79,6 +78,46 @@ function Field({ label, children }) {
   );
 }
 
+/* =========================
+   UI: Skeletons (UI only)
+========================= */
+function SkeletonLine({ w = "w-full" }) {
+  return <div className={`h-3 ${w} rounded bg-slate-800/70 animate-pulse`} />;
+}
+
+function ContractCardSkeleton() {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <SkeletonLine w="w-1/2" />
+          <SkeletonLine w="w-4/5" />
+        </div>
+        <div className="h-5 w-20 rounded-full bg-slate-800/70 animate-pulse" />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+          <SkeletonLine w="w-1/2" />
+          <SkeletonLine w="w-2/3" />
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+          <SkeletonLine w="w-1/2" />
+          <SkeletonLine w="w-2/3" />
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 col-span-2 space-y-2">
+          <SkeletonLine w="w-1/3" />
+          <SkeletonLine w="w-5/6" />
+        </div>
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <div className="h-9 w-24 rounded-xl bg-slate-800/70 animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 function ContractModal({ open, onClose, contract }) {
   useEffect(() => {
     if (!open) return;
@@ -101,7 +140,7 @@ function ContractModal({ open, onClose, contract }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
       onMouseDown={(e) => {
@@ -110,9 +149,9 @@ function ContractModal({ open, onClose, contract }) {
     >
       <div className="absolute inset-0 bg-black/60" />
 
-      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-800 px-5 py-4">
-          <div>
+      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl max-h-[92vh] overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-slate-800 px-4 sm:px-5 py-4">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-slate-100">
               Contract Details
             </h2>
@@ -120,14 +159,13 @@ function ContractModal({ open, onClose, contract }) {
 
           <button
             onClick={onClose}
-            className="rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+            className="w-full sm:w-auto rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition active:scale-[0.99]"
           >
             Close
           </button>
         </div>
 
-        <div className="max-h-[75vh] overflow-y-auto px-5 py-4">
-          {/* Nice summary (your main fields) */}
+        <div className="max-h-[75vh] overflow-y-auto px-4 sm:px-5 py-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Supplier">
               {formatPrimitive(contract?.supplier)}
@@ -139,28 +177,43 @@ function ContractModal({ open, onClose, contract }) {
               <StatusBadge status={contract?.status} />
             </Field>
 
-            <Field label="Description">
-              <div className="whitespace-pre-wrap">
-                {contract?.description || "—"}
-              </div>
-            </Field>
-            <Field label="Roles">
-              <div className="flex flex-wrap gap-2">
-                {Array.isArray(contract?.roles) && contract.roles.length > 0 ? (
-                  contract.roles.map((r, i) => (
-                    <span
-                      key={i}
-                      className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
-                    >
-                      {r?.role || r?.name || "—"}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-slate-400">—</span>
-                )}
-              </div>
-            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Description">
+                <div className="whitespace-pre-wrap">
+                  {contract?.description || "—"}
+                </div>
+              </Field>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Field label="Roles">
+                <div className="flex flex-wrap gap-2">
+                  {Array.isArray(contract?.roles) &&
+                  contract.roles.length > 0 ? (
+                    contract.roles.map((r, i) => (
+                      <span
+                        key={i}
+                        className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+                      >
+                        {r?.role || r?.name || "—"}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </div>
+              </Field>
+            </div>
           </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-800 px-4 sm:px-5 py-4">
+          <button
+            onClick={onClose}
+            className="w-full sm:w-auto rounded-lg border border-slate-700 bg-slate-950/30 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 transition active:scale-[0.99]"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>
@@ -252,29 +305,29 @@ export default function ContractsPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-7xl px-4 py-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Contracts</h1>
             <p className="mt-1 text-sm text-slate-400">
-              Click a row to open full details modal.
+              Tap a card to open full details.
             </p>
           </div>
 
           <Link
             href="/dashboard"
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+            className="w-full sm:w-auto text-center rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
           >
             ← Back
           </Link>
         </div>
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {["all", "active", "expired"].map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`rounded-lg px-3 py-2 text-sm border transition ${
+                className={`rounded-lg px-3 py-2 text-sm border transition active:scale-[0.99] ${
                   tab === t
                     ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-200"
                     : "border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
@@ -286,72 +339,114 @@ export default function ContractsPage() {
             ))}
           </div>
 
-          <div className="w-full sm:w-96">
+          <div className="w-full sm:w-96 relative">
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search anything..."
-              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400/60"
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 pl-3 pr-20 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400/60"
             />
+            {q?.trim() ? (
+              <button
+                type="button"
+                onClick={() => setQ("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md border border-slate-700 bg-slate-950/30 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 transition active:scale-[0.99]"
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
         </div>
 
-        <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40">
+        {/* Cards */}
+        <div className="mt-5">
           {loading ? (
-            <div className="p-5 text-sm text-slate-300">
-              Loading contracts...
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <ContractCardSkeleton key={i} />
+              ))}
             </div>
           ) : err ? (
-            <div className="p-5 text-sm text-red-300">{err}</div>
+            <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-5 text-sm text-red-200">
+              {err}
+            </div>
           ) : filtered.length === 0 ? (
-            <div className="p-5 text-sm text-slate-300">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-300">
               No contracts found.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="text-slate-300">
-                  <tr className="border-b border-slate-800">
-                    <th className="px-4 py-3">Supplier</th>
-                    <th className="px-4 py-3">Description</th>
-                    <th className="px-4 py-3">Domain</th>
-                    <th className="px-4 py-3">Start</th>
-                    <th className="px-4 py-3">End</th>
-                    <th className="px-4 py-3">Status</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filtered.map((c) => (
-                    <tr
-                      key={c?.id}
-                      onClick={() => openModal(c)}
-                      className="cursor-pointer border-b border-slate-800/70 hover:bg-slate-800/40 transition"
-                    >
-                      <td className="px-4 py-3 font-medium text-slate-100">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {filtered.map((c) => (
+                <button
+                  key={c?.id}
+                  type="button"
+                  onClick={() => openModal(c)}
+                  className="text-left rounded-2xl border border-slate-800 bg-slate-900/40 p-4 hover:bg-slate-900/60 hover:border-slate-700 transition active:scale-[0.99]"
+                  title="Click to view"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-100 truncate">
                         {c?.supplier || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-300">
-                        <div className="max-w-md truncate">
-                          {c?.description || "—"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-300">
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400 line-clamp-2">
+                        {c?.description || "—"}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      <StatusBadge status={c?.status} />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Domain
+                      </div>
+                      <div className="mt-1 text-sm text-slate-100">
                         {c?.domain || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-300">
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Start
+                      </div>
+                      <div className="mt-1 text-sm text-slate-100">
                         {toDateText(c?.startDate)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-300">
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                        End
+                      </div>
+                      <div className="mt-1 text-sm text-slate-100">
                         {toDateText(c?.endDate)}
-                      </td>
-                      <td className="px-4 py-3">
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Status
+                      </div>
+                      <div className="mt-1">
                         <StatusBadge status={c?.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-end gap-2">
+                    <span className="text-xs text-slate-400">
+                      Click to view details
+                    </span>
+                    <span className="text-xs rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-slate-200">
+                      Open
+                    </span>
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </div>

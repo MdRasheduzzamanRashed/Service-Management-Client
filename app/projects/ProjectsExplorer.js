@@ -129,6 +129,46 @@ function RolesChips({ roles }) {
   );
 }
 
+/* =========================
+   UI: Skeletons (UI only)
+========================= */
+function SkeletonLine({ w = "w-full" }) {
+  return <div className={`h-3 ${w} rounded bg-slate-800/70 animate-pulse`} />;
+}
+
+function ProjectCardSkeleton() {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <SkeletonLine w="w-1/3" />
+          <SkeletonLine w="w-3/4" />
+        </div>
+        <div className="h-5 w-20 rounded-full bg-slate-800/70 animate-pulse" />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+          <SkeletonLine w="w-1/2" />
+          <SkeletonLine w="w-2/3" />
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+          <SkeletonLine w="w-1/2" />
+          <SkeletonLine w="w-2/3" />
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 col-span-2 space-y-2">
+          <SkeletonLine w="w-1/3" />
+          <SkeletonLine w="w-5/6" />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 justify-end">
+        <div className="h-9 w-24 rounded-xl bg-slate-800/70 animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 function ProjectModal({ open, onClose, project }) {
   useEffect(() => {
     if (!open) return;
@@ -154,7 +194,7 @@ function ProjectModal({ open, onClose, project }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
       onMouseDown={(e) => {
@@ -163,26 +203,26 @@ function ProjectModal({ open, onClose, project }) {
     >
       <div className="absolute inset-0 bg-black/60" />
 
-      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-800 px-5 py-4">
-          <div>
+      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl max-h-[92vh] overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-slate-800 px-4 sm:px-5 py-4">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-slate-100">
               Project Details
             </h2>
-            <div className="mt-1 text-xs text-slate-400">
+            <div className="mt-1 text-xs text-slate-400 break-words">
               ID: <span className="text-slate-300">{project?.id || "—"}</span>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+            className="w-full sm:w-auto rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition active:scale-[0.99]"
           >
             Close
           </button>
         </div>
 
-        <div className="max-h-[75vh] overflow-y-auto px-5 py-4">
+        <div className="max-h-[75vh] overflow-y-auto px-4 sm:px-5 py-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Main fields */}
             <Field label="Project ID">{project?.projectId || "—"}</Field>
@@ -254,10 +294,10 @@ function ProjectModal({ open, onClose, project }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-slate-800 px-5 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-slate-800 px-4 sm:px-5 py-4">
           <button
             onClick={onClose}
-            className="rounded-lg border border-slate-700 bg-slate-950/30 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+            className="w-full sm:w-auto rounded-lg border border-slate-700 bg-slate-950/30 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 transition active:scale-[0.99]"
           >
             Close
           </button>
@@ -275,6 +315,15 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+
+  // UI-only: show skeleton once when initialProjects empty (optional)
+  const [hydrating, setHydrating] = useState(false);
+  useEffect(() => {
+    if (initialProjects?.length) return;
+    setHydrating(true);
+    const t = setTimeout(() => setHydrating(false), 550);
+    return () => clearTimeout(t);
+  }, [initialProjects?.length]);
 
   const counts = useMemo(() => {
     const published = projects.filter(
@@ -300,7 +349,6 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
       .filter((p) => {
         if (!needle) return true;
 
-        // Search only main fields + skills/locations text
         const skills = joinList(pickList(p, "selectedSkills"), 999);
         const locations = joinList(pickList(p, "selectedLocations"), 999);
 
@@ -334,20 +382,31 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-7xl">
-        <div className="flex items-start justify-between gap-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 px-4 py-6">
+      <div className="mx-auto w-full max-w-7xl">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold">All Projects</h1>
-            
+            <p className="mt-1 text-sm text-slate-400">
+              Browse, search, and open a project to view details.
+            </p>
           </div>
 
-          
+          {/* Optional: quick back link (UI only) */}
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 transition"
+            >
+              Back
+            </Link>
+          </div>
         </div>
 
-        {/* Tabs + Search (same style as contracts) */}
+        {/* Tabs + Search */}
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {[
               ["all", "All"],
               ["published", "Published"],
@@ -356,7 +415,7 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                className={`rounded-lg px-3 py-2 text-sm border transition ${
+                className={`rounded-lg px-3 py-2 text-sm border transition active:scale-[0.99] ${
                   tab === key
                     ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-200"
                     : "border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
@@ -368,84 +427,125 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
             ))}
           </div>
 
-          <div className="w-full sm:w-96">
+          <div className="w-full sm:w-96 relative">
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search projectId, description, skills, locations..."
-              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400/60"
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 pl-3 pr-20 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400/60"
             />
+            {q?.trim() ? (
+              <button
+                type="button"
+                onClick={() => setQ("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md border border-slate-700 bg-slate-950/30 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 transition active:scale-[0.99]"
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
         </div>
 
-        {/* Table (MAIN data only) */}
-        <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40">
-          {filtered.length === 0 ? (
-            <div className="p-5 text-sm text-slate-300">No projects found.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="text-slate-300">
-                  <tr className="border-b border-slate-800">
-                    <th className="px-4 py-3">Project ID</th>
-                    <th className="px-4 py-3">Project Description</th>
-                    <th className="px-4 py-3">Start</th>
-                    <th className="px-4 py-3">End</th>
-                    <th className="px-4 py-3">Locations</th>
-                    <th className="px-4 py-3">Skills</th>
-                    <th className="px-4 py-3">Status</th>
-                  </tr>
-                </thead>
+        {/* Cards (Responsive on all devices) */}
+        <div className="mt-5">
+          {/* Skeletons */}
+          {hydrating && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <ProjectCardSkeleton key={i} />
+              ))}
+            </div>
+          )}
 
-                <tbody>
-                  {filtered.map((p) => {
-                    const skills = pickList(p, "selectedSkills");
-                    const locations = pickList(p, "selectedLocations");
+          {/* Empty */}
+          {!hydrating && filtered.length === 0 && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-300">
+              No projects found.
+            </div>
+          )}
 
-                    return (
-                      <tr
-                        key={p?.id || p?.projectId}
-                        onClick={() => openModal(p)}
-                        className="cursor-pointer border-b border-slate-800/70 hover:bg-slate-800/40 transition"
-                        title="Click to view"
-                      >
-                        <td className="px-4 py-3 font-medium text-slate-100">
+          {/* Cards */}
+          {!hydrating && filtered.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {filtered.map((p) => {
+                const skills = pickList(p, "selectedSkills");
+                const locations = pickList(p, "selectedLocations");
+
+                return (
+                  <button
+                    key={p?.id || p?.projectId}
+                    type="button"
+                    onClick={() => openModal(p)}
+                    className="text-left rounded-2xl border border-slate-800 bg-slate-900/40 p-4 hover:bg-slate-900/60 hover:border-slate-700 transition active:scale-[0.99]"
+                    title="Click to view"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-100 truncate">
                           {p?.projectId || "—"}
-                        </td>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400 line-clamp-2">
+                          {p?.projectDescription || "—"}
+                        </div>
+                      </div>
 
-                        <td className="px-4 py-3 text-slate-300">
-                          <div className="max-w-md truncate">
-                            {p?.projectDescription || "—"}
-                          </div>
-                        </td>
+                      <div className="shrink-0">
+                        <StatusBadge
+                          status={p?.status}
+                          isPublished={p?.isPublished}
+                        />
+                      </div>
+                    </div>
 
-                        <td className="px-4 py-3 text-slate-300">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Start
+                        </div>
+                        <div className="mt-1 text-sm text-slate-100">
                           {toDateText(p?.projectStart)}
-                        </td>
+                        </div>
+                      </div>
 
-                        <td className="px-4 py-3 text-slate-300">
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                          End
+                        </div>
+                        <div className="mt-1 text-sm text-slate-100">
                           {toDateText(p?.projectEnd)}
-                        </td>
+                        </div>
+                      </div>
 
-                        <td className="px-4 py-3 text-slate-300">
-                          {joinList(locations)}
-                        </td>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 col-span-2">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Locations
+                        </div>
+                        <div className="mt-1 text-sm text-slate-100">
+                          {joinList(locations, 6)}
+                        </div>
+                      </div>
 
-                        <td className="px-4 py-3 text-slate-300">
-                          {joinList(skills)}
-                        </td>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 col-span-2">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Skills
+                        </div>
+                        <div className="mt-1 text-sm text-slate-100">
+                          {joinList(skills, 6)}
+                        </div>
+                      </div>
+                    </div>
 
-                        <td className="px-4 py-3">
-                          <StatusBadge
-                            status={p?.status}
-                            isPublished={p?.isPublished}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <span className="text-xs text-slate-400">
+                        Click to view details
+                      </span>
+                      <span className="text-xs rounded-lg border border-slate-700 bg-slate-950/30 px-3 py-2 text-slate-200">
+                        Open
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
