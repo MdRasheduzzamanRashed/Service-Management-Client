@@ -81,34 +81,25 @@ function getPrice(o) {
   return Number.isFinite(num) ? num : null;
 }
 
-function getDeliveryRisk(o) {
-  const v = String(
-    o?.deliveryRisk || o?.scorecard?.deliveryRisk || "",
-  ).toUpperCase();
-  return v || "—";
+function getSupplierScorecard(o) {
+  const tech = o?.scorecard?.technicalScore;
+  const comm = o?.scorecard?.commercialScore;
+  const risk = o?.scorecard?.deliveryRisk;
+
+  const techTxt = Number.isFinite(Number(tech))
+    ? `TS: ${Number(tech).toFixed(0)}`
+    : "TS: —";
+  const commTxt = Number.isFinite(Number(comm))
+    ? `CS: ${Number(comm).toFixed(0)}`
+    : "CS: —";
+
+  const riskTxt = String(`DR: ${risk}` || "DR: —");
+
+  return { techTxt, commTxt, riskTxt };
 }
 
-function DeliveryRiskPill({ risk }) {
-  const r = String(risk || "—").toUpperCase();
 
-  const cls =
-    r === "LOW"
-      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-      : r === "MEDIUM"
-        ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-        : r === "HIGH"
-          ? "border-red-500/40 bg-red-500/10 text-red-200"
-          : "border-slate-700 bg-slate-900 text-slate-200";
 
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border ${cls}`}
-      title="Delivery risk (from offer.scorecard.deliveryRisk)"
-    >
-      {r}
-    </span>
-  );
-}
 
 export default function RPEvaluationPage() {
   const router = useRouter();
@@ -262,8 +253,9 @@ export default function RPEvaluationPage() {
             price: getPrice(o),
             currency: getCurrency(o),
 
-            // you asked for deliveryRisk
-            deliveryRisk: getDeliveryRisk(o),
+            // you asked for supplierScorecard
+            supplierScorecard: getSupplierScorecard(o),
+
 
             // your current offers may not have deliveryDays; keep if you add later
             deliveryDays: o?.deliveryDays ?? null,
@@ -456,8 +448,8 @@ export default function RPEvaluationPage() {
                 <th className="px-3 py-2 text-left">Choose</th>
                 <th className="px-3 py-2 text-left">Provider</th>
                 <th className="px-3 py-2 text-left">Price</th>
-                <th className="px-3 py-2 text-left">Delivery Risk</th>
-                <th className="px-3 py-2 text-left">Score (0-10)</th>
+                <th className="px-3 py-2 text-left">Supplier Scorecard</th>
+                <th className="px-3 py-2 text-left">RP Score (0-10)</th>
                 <th className="px-3 py-2 text-left">Notes</th>
                 <th className="px-3 py-2 text-left">Total</th>
               </tr>
@@ -481,8 +473,6 @@ export default function RPEvaluationPage() {
 
                 const price = getPrice(offer);
                 const currency = getCurrency(offer);
-
-                const risk = getDeliveryRisk(offer);
 
                 return (
                   <tr
@@ -515,7 +505,22 @@ export default function RPEvaluationPage() {
                     </td>
 
                     <td className="px-3 py-2">
-                      <DeliveryRiskPill risk={risk} />
+                      {(() => {
+                        const s = getSupplierScorecard(offer);
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <div className="text-[11px] text-slate-300">
+                              {s.techTxt}
+                            </div>
+                            <div className="text-[11px] text-slate-300">
+                              {s.commTxt}
+                            </div>
+                            <div  className="text-[11px] text-slate-300">
+                              {s.riskTxt}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     <td className="px-3 py-2">

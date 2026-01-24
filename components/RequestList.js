@@ -120,7 +120,11 @@ function StatusBadge({ status }) {
 
 /* =========================
    Offers Modal
-   ✅ IMPORTANT FIX: remove Cache-Control headers here too
+   ✅ FIXED:
+   - requestId memo depends on reqDoc?._id (not whole object)
+   - offers response parsing supports array OR {data: []}
+   - Action column REMOVED
+   - Evaluate button uses requestStatus + requestId (correct)
 ========================= */
 function scoreOffer(o) {
   const price = Number(o?.price ?? 1e12);
@@ -129,7 +133,7 @@ function scoreOffer(o) {
 }
 
 function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
-  const requestId = useMemo(() => normalizeId(reqDoc?._id), [reqDoc]);
+  const requestId = useMemo(() => normalizeId(reqDoc?._id), [reqDoc?._id]);
 
   const [request, setRequest] = useState(reqDoc || null);
   const [offers, setOffers] = useState([]);
@@ -142,14 +146,18 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     () => String(request?.status || "").toUpperCase(),
     [request?.status],
   );
+
   const recommendedOfferId = useMemo(
-    () => String(request?.recommendedOfferId || "").trim(),
+    () => normalizeId(request?.recommendedOfferId),
     [request?.recommendedOfferId],
   );
 
   const canRecommend = role === "RESOURCE_PLANNER";
   const canSendToPO = role === "PROJECT_MANAGER";
   const canOrder = role === "PROCUREMENT_OFFICER";
+
+  const canEvaluate =
+    role === "RESOURCE_PLANNER" && requestStatus === "BID_EVALUATION";
 
   const bestAuto = useMemo(() => {
     const arr = (offers || [])
@@ -176,7 +184,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       setLoadingReq(true);
       const r = await fetchWithRetry(
         () =>
-          apiGet(`/requests/${requestId}`, {
+          apiGet(`/requests/${encodeURIComponent(requestId)}`, {
             headers: { ...authHeaders },
             params: { _t: Date.now() },
             signal: ac.signal,
@@ -186,6 +194,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       setRequest(r?.data || null);
     } catch (e) {
       if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
+      setErr(getErrMsg(e));
     } finally {
       setLoadingReq(false);
     }
@@ -212,8 +221,15 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
         { retries: 2, baseDelay: 450 },
       );
 
-      // offers endpoint usually returns array
-      setOffers(Array.isArray(res?.data) ? res.data : res?.data?.data || []);
+      // ✅ robust parse (array OR {data: []})
+      const payload = res?.data;
+      const rows = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+
+      setOffers(rows);
     } catch (e) {
       if (e?.name === "CanceledError" || e?.code === "ERR_CANCELED") return;
       setOffers([]);
@@ -238,7 +254,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     try {
       setErr("");
       const res = await apiPost(
-        `/requests/${requestId}/rp-recommend-offer`,
+        `/requests/${encodeURIComponent(requestId)}/rp-recommend-offer`,
         { offerId },
         {
           headers: { ...authHeaders },
@@ -265,7 +281,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     try {
       setErr("");
       const res = await apiPost(
-        `/requests/${requestId}/send-to-po`,
+        `/requests/${encodeURIComponent(requestId)}/send-to-po`,
         {},
         {
           headers: { ...authHeaders },
@@ -294,7 +310,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       }
 
       const res = await apiPost(
-        `/requests/${requestId}/order`,
+        `/requests/${encodeURIComponent(requestId)}/order`,
         { offerId },
         {
           headers: { ...authHeaders },
@@ -323,6 +339,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 <span className="text-[11px] text-slate-400">(syncing…)</span>
               )}
             </h3>
+
             <p className="text-xs text-slate-400">
               {request?.title || "Untitled"} ·{" "}
               <span className="text-slate-300">Request ID:</span>{" "}
@@ -350,40 +367,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                loadRequest();
-                loadOffers();
-              }}
-              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
-              type="button"
-            >
-              Refresh
-            </button>
-            <button
-              onClick={onClose}
-              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
-              type="button"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-
-        {err && <div className="text-xs text-red-300">{err}</div>}
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-800 bg-slate-900/30 p-3">
-          <div className="text-xs text-slate-300">
-            <span className="text-slate-400">Tip:</span> Best offer auto-score
-            is{" "}
-            <span className="text-slate-200">
-              {bestAuto
-                ? `${bestAuto.providerUsername} (score ${scoreOffer(bestAuto).toFixed(1)})`
-                : "—"}
-            </span>
-          </div>
-
-          <div className="flex gap-2 flex-wrap justify-end">
             {canSendToPO && (
               <button
                 onClick={sendToPO}
@@ -405,39 +388,71 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                 Place Order
               </button>
             )}
+
+            {canEvaluate ? (
+              <Link
+                href={`/requests/${encodeURIComponent(requestId)}/evaluation`}
+                className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400"
+              >
+                Evaluate
+              </Link>
+            ) : null}
+
+            <button
+              onClick={() => {
+                loadRequest();
+                loadOffers();
+              }}
+              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
+              type="button"
+            >
+              Refresh
+            </button>
+
+            <button
+              onClick={onClose}
+              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-800"
+              type="button"
+            >
+              Close
+            </button>
           </div>
         </div>
+
+        {err && (
+          <div className="rounded-xl border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-200">
+            {err}
+          </div>
+        )}
 
         <div className="overflow-x-auto rounded-xl border border-slate-800">
           <table className="min-w-[900px] w-full text-sm">
             <thead className="bg-slate-950/60 text-[11px] text-slate-400">
               <tr>
-                <th className="px-3 py-2 text-left">Provider</th>
-                <th className="px-3 py-2 text-left">Price</th>
-                <th className="px-3 py-2 text-left">Delivery Days</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-left">Created</th>
-                <th className="px-3 py-2 text-right">Action</th>
+                <th className="px-3 py-2 text-left">Company Name</th>
+                <th className="px-3 py-2 text-center">For</th>
+                <th className="px-3 py-2 text-center">Delivery Risk</th>
+                <th className="px-3 py-2 text-center">Technical Score</th>
+                <th className="px-3 py-2 text-center">Commercial Score</th>{" "}
+                <th className="px-3 py-2 text-center">Overall Score</th>
               </tr>
             </thead>
 
             <tbody>
               {(offers || []).map((o) => {
                 const oid = normalizeId(o?._id);
-                const isRec =
-                  recommendedOfferId &&
-                  String(oid) === String(recommendedOfferId);
+                const isRec = recommendedOfferId && oid === recommendedOfferId;
 
                 return (
                   <tr
                     key={
                       oid ||
-                      `${o?.providerUsername}-${o?.price}-${o?.deliveryDays}`
+                      `${o?.vendor?.companyName}-${o?.roles.length}-${o?.scorecard?.deliveryRisk}-${o?.scorecard?.technicalScore}-${o?.scorecard?.commercialScore}-${o?.scorecard?.overallScore}`
                     }
                     className="border-t border-slate-800 hover:bg-slate-950/30"
                   >
                     <td className="px-3 py-2 text-slate-100">
-                      {o?.providerName || o?.providerUsername || "—"}
+                      {o?.vendor?.companyName || "—"}
                       {isRec ? (
                         <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border border-teal-700/40 bg-teal-950/30 text-teal-200">
                           Recommended
@@ -445,39 +460,23 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                       ) : null}
                     </td>
 
-                    <td className="px-3 py-2 text-slate-300">
-                      {o?.price != null
-                        ? `${o.price} ${o.currency || "EUR"}`
-                        : "—"}
+                    <td className="px-3 py-2 text-slate-300  text-center">
+                      {o?.roles.length || "—"}
                     </td>
 
-                    <td className="px-3 py-2 text-slate-300">
-                      {o?.deliveryDays ?? "—"}
+                    <td className="px-3 py-2 text-slate-300  text-center">
+                      {o?.scorecard?.deliveryRisk ?? "—"}
                     </td>
 
-                    <td className="px-3 py-2">
-                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-slate-200">
-                        {String(o?.status || "").toUpperCase() || "—"}
-                      </span>
+                    <td className="px-3 py-2 text-slate-300  text-center">
+                      {o?.scorecard?.technicalScore || "—"}
                     </td>
 
-                    <td className="px-3 py-2 text-slate-300">
-                      {fmtDate(o?.createdAt)}
+                    <td className="px-3 py-2 text-slate-300  text-center">
+                      {o?.scorecard?.commercialScore || "—"}
                     </td>
-
-                    <td className="px-3 py-2 text-right">
-                      {canRecommend ? (
-                        <button
-                          className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black text-xs hover:bg-emerald-400 disabled:opacity-50"
-                          onClick={() => recommend(oid)}
-                          disabled={!oid || requestStatus !== "BID_EVALUATION"}
-                          type="button"
-                        >
-                          Recommend
-                        </button>
-                      ) : (
-                        <span className="text-xs text-slate-500">—</span>
-                      )}
+                    <td className="px-3 py-2 text-slate-300 text-center">
+                      {o?.scorecard?.overallScore || "—"}
                     </td>
                   </tr>
                 );
@@ -485,8 +484,22 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
               {!loadingOffers && (!offers || offers.length === 0) && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-xs text-slate-400">
+                  <td
+                    colSpan={canRecommend ? 6 : 5}
+                    className="px-3 py-6 text-xs text-slate-400"
+                  >
                     No offers found for this request.
+                  </td>
+                </tr>
+              )}
+
+              {loadingOffers && (
+                <tr>
+                  <td
+                    colSpan={canRecommend ? 6 : 5}
+                    className="px-3 py-6 text-xs text-slate-400"
+                  >
+                    Loading offers...
                   </td>
                 </tr>
               )}
@@ -494,19 +507,13 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </table>
         </div>
 
-        <p className="text-[11px] text-slate-500">
-          Uses{" "}
-          <span className="text-slate-300">GET /api/offers?requestId=...</span>{" "}
-          and actions{" "}
-          <span className="text-slate-300">/api/requests/:id/...</span>.
-        </p>
       </div>
     </div>
   );
 }
 
 /* =========================
-   RequestList (FIXED parsing)
+   RequestList (unchanged)
 ========================= */
 export default function RequestList({ view = "all" }) {
   const router = useRouter();
@@ -562,7 +569,7 @@ export default function RequestList({ view = "all" }) {
     const params = {};
     if (view === "my") params.view = "my";
     if (view === "review") params.status = "IN_REVIEW";
-    if (qDebounced) params.q = qDebounced; // ✅ backend supports q
+    if (qDebounced) params.q = qDebounced;
     return params;
   }, [view, qDebounced]);
 
@@ -600,14 +607,13 @@ export default function RequestList({ view = "all" }) {
         const res = await fetchWithRetry(
           () =>
             apiGet("/requests", {
-              headers: { ...authHeaders }, // ✅ no cache-control headers
+              headers: { ...authHeaders },
               params: { ...params, _t: Date.now() },
               signal: ac.signal,
             }),
           { retries: 2, baseDelay: 450 },
         );
 
-        // ✅ FIX: backend returns {data, meta}
         const payload = res?.data;
         const rows = Array.isArray(payload)
           ? payload
@@ -838,7 +844,7 @@ export default function RequestList({ view = "all" }) {
                       >
                         View
                       </Link>
-                      {/* ✅ RP Evaluation button */}
+
                       {role === "RESOURCE_PLANNER" &&
                         status === "BID_EVALUATION" && (
                           <Link
@@ -848,6 +854,7 @@ export default function RequestList({ view = "all" }) {
                             Evaluate
                           </Link>
                         )}
+
                       {canEdit && (
                         <Link
                           href={`/requests/${id}/edit`}
