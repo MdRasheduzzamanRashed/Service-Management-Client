@@ -10,6 +10,7 @@ import DashboardRequestsCard from "../../components/DashboardRequestsCard";
 import RequestList from "../../components/RequestList";
 import ProjectsExplorer from "../projects/ProjectsExplorer";
 import MyOrdersPage from "../orders/page";
+import Projects from "../projects/page";
 
 function normalizeRole(raw) {
   const s = String(raw || "").trim();
@@ -65,20 +66,7 @@ function DashboardContent() {
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h2 className="text-sm font-semibold text-slate-100">
-                  Projects
-                </h2>
-                <a
-                  href="/projects"
-                  className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800"
-                >
-                  Open All Projects
-                </a>
-              </div>
-              <div className="mt-3">
-                <ProjectsExplorer />
-              </div>
+              <Projects></Projects>
             </div>
           </div>
         )}
