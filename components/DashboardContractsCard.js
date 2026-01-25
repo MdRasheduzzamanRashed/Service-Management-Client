@@ -8,6 +8,29 @@ import toast from "react-hot-toast";
 const CONTRACTS_API = process.env.NEXT_PUBLIC_CONTRACTS_API;
 const TOAST_ID = "contracts-loading";
 
+/** Always return a string message (never an object) */
+function errToMsg(e) {
+  if (!e) return "Failed to load contracts";
+
+  // Axios response payload (often object)
+  const data = e?.response?.data;
+
+  // Prefer nice messages first
+  if (e?.response?.status === 401) {
+    return "Contracts API is protected (401). Please provide token/credentials.";
+  }
+  if (typeof data === "string" && data.trim()) return data;
+  if (data?.message) return String(data.message);
+  if (data?.error) return String(data.error);
+
+  // If API returns { statusCode, isOperational, status } etc.
+  if (data && typeof data === "object") return JSON.stringify(data);
+
+  // Fallback
+  if (e?.message) return String(e.message);
+  return "Failed to load contracts";
+}
+
 export default function DashboardContractsCard() {
   const router = useRouter();
 
@@ -27,16 +50,22 @@ export default function DashboardContractsCard() {
       toast.loading("Loading contracts...", { id: TOAST_ID });
 
       try {
-        if (!CONTRACTS_API)
+        if (!CONTRACTS_API) {
           throw new Error("Missing NEXT_PUBLIC_CONTRACTS_API");
+        }
 
         const res = await axios.get(CONTRACTS_API, {
-          headers: { Accept: "application/json" },
+          headers: {
+            Accept: "application/json",
+            // If they give you token later, add it like:
+            // Authorization: `Bearer ${token}`,
+          },
           signal: controller.signal,
         });
 
         const data = res?.data;
 
+        // Accept multiple shapes
         const list =
           (Array.isArray(data) && data) ||
           (Array.isArray(data?.data) && data.data) ||
@@ -51,8 +80,7 @@ export default function DashboardContractsCard() {
         // Abort is normal in dev StrictMode
         if (e?.name === "CanceledError" || e?.name === "AbortError") return;
 
-        const msg =
-          e?.response?.data?.error || e?.message || "Failed to load contracts";
+        const msg = errToMsg(e);
 
         if (!alive) return;
 
@@ -101,7 +129,7 @@ export default function DashboardContractsCard() {
             Loading...
           </h2>
         ) : err ? (
-          <div className="mt-2 text-xs text-red-300">{err}</div>
+          <div className="mt-2 text-xs text-red-300 break-words">{err}</div>
         ) : (
           <h2 className="mt-1 text-lg font-semibold text-slate-50">
             Total: {stats.total}
