@@ -5,6 +5,9 @@ import Link from "next/link";
 import { AuthContext } from "../../context/AuthContext";
 import { apiGet } from "../../lib/api";
 
+/* =========================
+   Helpers
+========================= */
 function roleUpper(x) {
   return String(x || "")
     .trim()
@@ -27,7 +30,7 @@ function fmtMoney(v, currency = "EUR") {
 }
 
 /* =========================
-   UI helpers (NO logic change)
+   UI helpers
 ========================= */
 function SkeletonLine({ w = "w-full" }) {
   return <div className={`h-3 ${w} rounded bg-slate-800/70 animate-pulse`} />;
@@ -81,11 +84,24 @@ function StatPill({ label, value }) {
   );
 }
 
+/* =========================================================
+   OrdersPage
+   ✅ Swapped responsibilities:
+   - Ordering role is RESOURCE_PLANNER (RP)
+   - Admin can view everything
+   Endpoints used:
+   - GET /orders/my  (for "My Orders")
+   - GET /orders     (for "All Orders")
+========================================================= */
 export default function OrdersPage() {
   const { user, authHeaders, loading: authLoading } = useContext(AuthContext);
+
   const role = useMemo(() => roleUpper(user?.role), [user?.role]);
-  const isPO = role === "PROCUREMENT_OFFICER";
+  const isRP = role === "RESOURCE_PLANNER";
+  const isAdmin = role === "SYSTEM_ADMIN";
+
   const headersReady = !!authHeaders?.["x-user-role"] && !authLoading;
+  const canViewOrders = isRP || isAdmin;
 
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -95,16 +111,24 @@ export default function OrdersPage() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("newest");
 
+  // If not admin, force "my" tab (admins can see both)
+  useEffect(() => {
+    if (canViewOrders && !isAdmin) setTab("my");
+  }, [canViewOrders, isAdmin]);
+
   const load = useCallback(async () => {
     if (!headersReady) return;
-    if (!isPO) return;
+    if (!canViewOrders) return;
 
     try {
       setErr("");
       setLoading(true);
 
       const endpoint = tab === "all" ? "/orders" : "/orders/my";
-      const res = await apiGet(endpoint, { headers: authHeaders });
+      const res = await apiGet(endpoint, {
+        headers: authHeaders,
+        params: { _t: Date.now() },
+      });
 
       setList(Array.isArray(res?.data) ? res.data : []);
     } catch (e) {
@@ -113,7 +137,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [authHeaders, headersReady, isPO, tab]);
+  }, [authHeaders, headersReady, canViewOrders, tab]);
 
   useEffect(() => {
     load();
@@ -158,6 +182,8 @@ export default function OrdersPage() {
           o?.requestId,
           o?.providerName,
           o?.providerUsername,
+          o?.orderId,
+          o?._id,
         ]
           .filter(Boolean)
           .join(" ")
@@ -188,13 +214,14 @@ export default function OrdersPage() {
     return rows;
   }, [list, q, sort]);
 
-  if (!headersReady)
+  if (!headersReady) {
     return <div className="p-4 text-xs text-slate-300">Loading…</div>;
+  }
 
-  if (!isPO) {
+  if (!canViewOrders) {
     return (
       <div className="p-4 text-xs text-red-400">
-        Only Procurement Officer can view orders.
+        Only Resource Planner (Ordering role) or System Admin can view orders.
       </div>
     );
   }
@@ -214,6 +241,7 @@ export default function OrdersPage() {
           onClick={load}
           disabled={loading}
           className="px-3 py-2 rounded-xl border border-slate-700 text-sm hover:bg-slate-800 disabled:opacity-60"
+          type="button"
         >
           {loading ? "Loading..." : "Refresh"}
         </button>
@@ -224,9 +252,13 @@ export default function OrdersPage() {
         <Chip active={tab === "my"} onClick={() => setTab("my")}>
           My Orders
         </Chip>
-        <Chip active={tab === "all"} onClick={() => setTab("all")}>
-          All Orders
-        </Chip>
+
+        {/* ✅ only admin can see All Orders */}
+        {isAdmin && (
+          <Chip active={tab === "all"} onClick={() => setTab("all")}>
+            All Orders
+          </Chip>
+        )}
       </div>
 
       {/* Stats */}
@@ -265,7 +297,7 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Cards (ALL devices) */}
+      {/* Cards */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -280,6 +312,7 @@ export default function OrdersPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {filtered.map((o) => {
             const id = String(o?._id || "");
+
             return (
               <div
                 key={id}
@@ -292,12 +325,13 @@ export default function OrdersPage() {
                       {o?.snapshot?.requestTitle || o?.requestId || "—"}
                     </p>
                     <p className="mt-1 text-[11px] text-slate-500 break-all">
-                      {o?.requestId || "—"}
+                      Request: {o?.requestId || "—"}
                     </p>
                   </div>
 
+                  {/* If you have an /orders/[id] page, change this link */}
                   <Link
-                    href={`/requests/${o?.requestId}`}
+                    href={`/requests/${encodeURIComponent(o?.requestId || "")}`}
                     className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
                   >
                     View
@@ -333,6 +367,12 @@ export default function OrdersPage() {
                       {fmtDate(o?.orderedAt)}
                     </p>
                   </div>
+                </div>
+
+                {/* Footer */}
+                <div className="mt-3 pt-3 border-t border-slate-800 text-[11px] text-slate-500">
+                  Ordered by:{" "}
+                  <span className="text-slate-300">{o?.orderedBy || "—"}</span>
                 </div>
               </div>
             );

@@ -1,3 +1,4 @@
+// app/api/external/projects/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,79 @@ function pickUrl() {
   ).trim();
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function clip(s, max = 4000) {
+  const str = String(s ?? "");
+  return str.length > max ? str.slice(0, max) + "…(clipped)" : str;
+}
+
+function isRetryableStatus(status) {
+  return status >= 500 && status <= 599;
+}
+
+async function fetchWithRetry(url, { retries = 2, timeoutMs = 20000 } = {}) {
+  let last;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: "application/json, */*",
+          "User-Agent": "ConsiderationNextProxy/1.0",
+        },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      const raw = await res.text().catch(() => "");
+
+      if (!res.ok) {
+        if (isRetryableStatus(res.status) && attempt < retries) {
+          clearTimeout(timer);
+          await sleep(600 * Math.pow(2, attempt));
+          continue;
+        }
+        return { ok: false, status: res.status, raw };
+      }
+
+      let json;
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        return {
+          ok: false,
+          status: 502,
+          raw: `JSON parse failed. Raw: ${raw}`,
+        };
+      }
+
+      return { ok: true, status: 200, json };
+    } catch (err) {
+      last = err;
+      if (attempt < retries) {
+        clearTimeout(timer);
+        await sleep(600 * Math.pow(2, attempt));
+        continue;
+      }
+      return {
+        ok: false,
+        status: 502,
+        raw: err?.name === "AbortError" ? "timeout" : err?.message,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return { ok: false, status: 502, raw: last?.message || "fetch failed" };
+}
+
 export async function GET() {
   const url = pickUrl();
   if (!url) {
@@ -18,50 +92,36 @@ export async function GET() {
     );
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const r = await fetchWithRetry(url, { retries: 2, timeoutMs: 20000 });
 
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: "application/json, */*" },
-      cache: "no-store",
-      signal: controller.signal,
-    });
-
-    const raw = await res.text();
-
-    if (!res.ok) {
-      return Response.json(
-        { error: `Projects API failed: ${res.status}`, raw },
-        { status: 502 },
-      );
-    }
-
-    let json;
-    try {
-      json = JSON.parse(raw);
-    } catch {
-      return Response.json(
-        { error: "Projects JSON parse failed", raw },
-        { status: 502 },
-      );
-    }
-
-    const list =
-      (Array.isArray(json) && json) ||
-      (Array.isArray(json?.data) && json.data) ||
-      (Array.isArray(json?.projects) && json.projects) ||
-      [];
-
-    return Response.json(list, { status: 200 });
-  } catch (err) {
-    const msg =
-      err?.name === "AbortError"
-        ? "Projects API timeout"
-        : err?.message || "Projects fetch failed";
-
-    return Response.json({ error: msg }, { status: 502 });
-  } finally {
-    clearTimeout(timeout);
+  if (!r.ok) {
+    return Response.json(
+      {
+        error:
+          r.raw === "timeout"
+            ? "Projects API timeout (Render cold start). Please retry."
+            : "Projects API failed",
+        upstreamStatus: r.status,
+        upstreamHost: (() => {
+          try {
+            return new URL(url).host;
+          } catch {
+            return "unknown";
+          }
+        })(),
+        details: clip(r.raw, 2500),
+      },
+      { status: 502 },
+    );
   }
+
+  const json = r.json;
+
+  const list =
+    (Array.isArray(json) && json) ||
+    (Array.isArray(json?.data) && json.data) ||
+    (Array.isArray(json?.projects) && json.projects) ||
+    [];
+
+  return Response.json(list, { status: 200 });
 }

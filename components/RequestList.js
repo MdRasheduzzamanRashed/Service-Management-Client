@@ -119,7 +119,7 @@ function StatusBadge({ status }) {
 }
 
 /* =========================
-   UI: Skeletons (UI only)
+   UI: Skeletons
 ========================= */
 function SkeletonLine({ w = "w-full" }) {
   return <div className={`h-3 ${w} rounded bg-slate-800/70 animate-pulse`} />;
@@ -138,7 +138,6 @@ function RequestCardSkeleton() {
           <SkeletonLine w="w-3/4" />
         </div>
       </div>
-
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
           <SkeletonLine w="w-1/2" />
@@ -153,7 +152,6 @@ function RequestCardSkeleton() {
           <SkeletonLine w="w-2/3" />
         </div>
       </div>
-
       <div className="mt-4 flex flex-wrap gap-2 justify-end">
         <div className="h-9 w-20 rounded-xl bg-slate-800/70 animate-pulse" />
         <div className="h-9 w-20 rounded-xl bg-slate-800/70 animate-pulse" />
@@ -173,26 +171,17 @@ function OfferCardSkeleton() {
         </div>
         <div className="h-5 w-20 rounded-full bg-slate-800/70 animate-pulse" />
       </div>
-
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2">
-          <SkeletonLine w="w-1/2" />
-          <SkeletonLine w="w-2/3" />
-        </div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-slate-800 bg-slate-950/50 p-2 space-y-2"
+          >
+            <SkeletonLine w="w-1/2" />
+            <SkeletonLine w="w-2/3" />
+          </div>
+        ))}
       </div>
-
       <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3 flex items-center justify-between">
         <SkeletonLine w="w-1/3" />
         <SkeletonLine w="w-16" />
@@ -202,14 +191,64 @@ function OfferCardSkeleton() {
 }
 
 /* =========================
-   Offers Modal
+   Offers helpers
 ========================= */
+function offerIdAny(o) {
+  return (
+    normalizeId(o?._id) || normalizeId(o?.id) || normalizeId(o?.offerId) || ""
+  );
+}
+
+function offerVendorName(o) {
+  return (
+    o?.vendor?.companyName ||
+    o?.vendor?.name ||
+    o?.providerName ||
+    o?.providerUsername ||
+    o?.provider?.name ||
+    "—"
+  );
+}
+
+function offerPrice(o) {
+  // supports:
+  // price / offerAmount.amount
+  const p1 = Number(o?.price);
+  if (Number.isFinite(p1)) return p1;
+
+  const p2 = Number(o?.offerAmount?.amount);
+  if (Number.isFinite(p2)) return p2;
+
+  const p3 = Number(
+    o?.workflow?.coordinator?.selectedOffer?.offerAmount?.amount,
+  );
+  if (Number.isFinite(p3)) return p3;
+
+  return null;
+}
+
+function offerDeliveryDays(o) {
+  const d1 = Number(o?.deliveryDays);
+  if (Number.isFinite(d1)) return d1;
+
+  const d2 = Number(o?.scorecard?.deliveryDays);
+  if (Number.isFinite(d2)) return d2;
+
+  return null;
+}
+
+// lower score = better (cheaper + faster)
 function scoreOffer(o) {
-  const price = Number(o?.price ?? 1e12);
-  const days = Number(o?.deliveryDays ?? 1e6);
+  const p = offerPrice(o);
+  const d = offerDeliveryDays(o);
+  const price = p == null ? 1e12 : p;
+  const days = d == null ? 1e6 : d;
   return price * 0.7 + days * 0.3;
 }
 
+/* =========================
+   Offers Modal
+========================= */
 function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   const requestId = useMemo(() => normalizeId(reqDoc?._id), [reqDoc?._id]);
 
@@ -230,11 +269,11 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     [request?.recommendedOfferId],
   );
 
+  // ✅ swapped roles rules
   const canSendToPO = role === "PROJECT_MANAGER";
-  const canOrder = role === "PROCUREMENT_OFFICER";
-
+  const canOrder = role === "RESOURCE_PLANNER"; // ✅ ordering role
   const canEvaluate =
-    role === "RESOURCE_PLANNER" && requestStatus === "BID_EVALUATION";
+    role === "PROCUREMENT_OFFICER" && requestStatus === "BID_EVALUATION"; // ✅ evaluator
 
   const bestAuto = useMemo(() => {
     const arr = (offers || [])
@@ -245,7 +284,8 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
   const disabledSendToPO = requestStatus !== "RECOMMENDED";
   const disabledOrder =
-    requestStatus !== "SENT_TO_PO" || (!recommendedOfferId && !bestAuto?._id);
+    requestStatus !== "SENT_TO_PO" ||
+    (!recommendedOfferId && !offerIdAny(bestAuto));
 
   const offersAbortRef = useRef(null);
   const reqAbortRef = useRef(null);
@@ -332,10 +372,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       const res = await apiPost(
         `/requests/${encodeURIComponent(requestId)}/send-to-po`,
         {},
-        {
-          headers: { ...authHeaders },
-          params: { _t: Date.now() },
-        },
+        { headers: { ...authHeaders }, params: { _t: Date.now() } },
       );
 
       const updatedReq = res?.data?.request;
@@ -352,7 +389,9 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     try {
       setErr("");
 
-      const offerId = String(recommendedOfferId || bestAuto?._id || "").trim();
+      const offerId = String(
+        recommendedOfferId || offerIdAny(bestAuto) || "",
+      ).trim();
       if (!offerId) {
         setErr("No offer to order (missing recommended offer).");
         return;
@@ -361,10 +400,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
       const res = await apiPost(
         `/requests/${encodeURIComponent(requestId)}/order`,
         { offerId },
-        {
-          headers: { ...authHeaders },
-          params: { _t: Date.now() },
-        },
+        { headers: { ...authHeaders }, params: { _t: Date.now() } },
       );
 
       const updatedReq = res?.data?.request;
@@ -480,7 +516,6 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
         )}
 
-        {/* Offers: Skeletons */}
         {loadingOffers && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -489,32 +524,36 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
         )}
 
-        {/* Offers: Empty */}
         {!loadingOffers && (!offers || offers.length === 0) && (
           <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
             No offers found for this request.
           </div>
         )}
 
-        {/* Offers: Cards */}
         {!loadingOffers && !!offers?.length && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {(offers || []).map((o) => {
-              const oid = normalizeId(o?._id);
-              const isRec = recommendedOfferId && oid === recommendedOfferId;
+              const oid = offerIdAny(o);
+
+              // recommendedOfferId might be _id or offerId — match both
+              const isRec =
+                !!recommendedOfferId &&
+                (oid === recommendedOfferId ||
+                  normalizeId(o?.offerId) === recommendedOfferId);
+
+              const vendor = offerVendorName(o);
 
               return (
                 <div
                   key={
-                    oid ||
-                    `${o?.vendor?.companyName}-${o?.roles.length}-${o?.scorecard?.deliveryRisk}-${o?.scorecard?.technicalScore}-${o?.scorecard?.commercialScore}-${o?.scorecard?.overallScore}`
+                    oid || `${vendor}-${Math.random().toString(16).slice(2)}`
                   }
                   className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 hover:border-slate-700 transition"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-slate-100 truncate">
-                        {o?.vendor?.companyName || "—"}
+                        {vendor}
                       </p>
 
                       <p className="text-[11px] text-slate-500 mt-0.5 break-words">
@@ -534,32 +573,34 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
-                      <p className="text-[10px] text-slate-500">For</p>
+                      <p className="text-[10px] text-slate-500">Price</p>
                       <p className="text-xs text-slate-200">
-                        {o?.roles.length || "—"}
+                        {offerPrice(o) == null
+                          ? "—"
+                          : `${offerPrice(o)} ${o?.currency || o?.offerAmount?.currency || "EUR"}`}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
-                      <p className="text-[10px] text-slate-500">
-                        Delivery Risk
-                      </p>
+                      <p className="text-[10px] text-slate-500">Delivery</p>
                       <p className="text-xs text-slate-200">
-                        {o?.scorecard?.deliveryRisk ?? "—"}
+                        {offerDeliveryDays(o) == null
+                          ? "—"
+                          : `${offerDeliveryDays(o)} days`}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
                       <p className="text-[10px] text-slate-500">Technical</p>
                       <p className="text-xs text-slate-200">
-                        {o?.scorecard?.technicalScore || "—"}
+                        {o?.scorecard?.technicalScore ?? "—"}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-2">
                       <p className="text-[10px] text-slate-500">Commercial</p>
                       <p className="text-xs text-slate-200">
-                        {o?.scorecard?.commercialScore || "—"}
+                        {o?.scorecard?.commercialScore ?? "—"}
                       </p>
                     </div>
                   </div>
@@ -567,7 +608,7 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
                   <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3 flex items-center justify-between">
                     <p className="text-[11px] text-slate-500">Overall Score</p>
                     <p className="text-sm font-semibold text-slate-100">
-                      {o?.scorecard?.overallScore || "—"}
+                      {o?.scorecard?.overallScore ?? "—"}
                     </p>
                   </div>
                 </div>
@@ -598,11 +639,11 @@ export default function RequestList({ view = "all" }) {
   );
 
   const isPM = role === "PROJECT_MANAGER";
-  const canSee =
-    role === "PROJECT_MANAGER" ||
-    role === "PROCUREMENT_OFFICER" ||
-    role === "RESOURCE_PLANNER" ||
-    role === "SYSTEM_ADMIN";
+  const isPO = role === "PROCUREMENT_OFFICER"; // ✅ swapped reviewer/evaluator
+  const isAdmin = role === "SYSTEM_ADMIN";
+  const isRP = role === "RESOURCE_PLANNER";
+
+  const canSee = isPM || isPO || isRP || isAdmin;
 
   const headersReady = !!authHeaders?.["x-user-role"];
   const usernameReady = !!authHeaders?.["x-username"];
@@ -651,6 +692,7 @@ export default function RequestList({ view = "all" }) {
         return;
       }
 
+      // ✅ view=my still PM only
       if (view === "my" && (!isPM || !usernameReady)) {
         setList([]);
         setErr(
@@ -658,6 +700,13 @@ export default function RequestList({ view = "all" }) {
             ? "Only Project Manager can view My Requests."
             : "Missing x-username. Logout/login again.",
         );
+        return;
+      }
+
+      // ✅ view=review should be PO/Admin (swap)
+      if (view === "review" && !(isPO || isAdmin)) {
+        setList([]);
+        setErr("Only Procurement Officer (or Admin) can view Review Queue.");
         return;
       }
 
@@ -700,7 +749,17 @@ export default function RequestList({ view = "all" }) {
         setRefreshing(false);
       }
     },
-    [authHeaders, buildParams, canSee, headersReady, isPM, usernameReady, view],
+    [
+      authHeaders,
+      buildParams,
+      canSee,
+      headersReady,
+      isPM,
+      isPO,
+      isAdmin,
+      usernameReady,
+      view,
+    ],
   );
 
   useEffect(() => {
@@ -783,7 +842,7 @@ export default function RequestList({ view = "all" }) {
           )}
         </div>
 
-        {/* Controls (UI only) */}
+        {/* Controls */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
           <div className="relative w-full sm:w-80">
             <input
@@ -840,7 +899,6 @@ export default function RequestList({ view = "all" }) {
         </div>
       )}
 
-      {/* Requests: Skeletons */}
       {loading && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -849,14 +907,12 @@ export default function RequestList({ view = "all" }) {
         </div>
       )}
 
-      {/* Requests: Empty */}
       {!loading && (!filtered || filtered.length === 0) && (
         <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400">
           No requests found.
         </div>
       )}
 
-      {/* Requests: Cards */}
       {!loading && !!filtered?.length && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {(filtered || []).map((r) => {
@@ -869,11 +925,12 @@ export default function RequestList({ view = "all" }) {
               headerUsername &&
               createdBy &&
               headerUsername === createdBy;
+
             const canEdit = owner && status === "DRAFT";
 
             return (
               <div
-                key={id || `${r?.title}-${r?.createdAt}`}
+                key={id || `${r?.title}-${r?.createdAt || Math.random()}`}
                 className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 hover:bg-slate-950/55 hover:border-slate-700 transition cursor-pointer"
                 onClick={() => id && router.push(`/requests/${id}`)}
               >
@@ -944,7 +1001,8 @@ export default function RequestList({ view = "all" }) {
                     View
                   </Link>
 
-                  {role === "RESOURCE_PLANNER" &&
+                  {/* ✅ Evaluate is PO now */}
+                  {role === "PROCUREMENT_OFFICER" &&
                     status === "BID_EVALUATION" && (
                       <Link
                         href={`/requests/${id}/evaluation`}

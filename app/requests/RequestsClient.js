@@ -21,15 +21,23 @@ export default function RequestsClient() {
   const [reloadToken, setReloadToken] = useState(0);
 
   const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
+
   const isPM = role === "PROJECT_MANAGER";
+  const isPO = role === "PROCUREMENT_OFFICER"; // ✅ swapped reviewer
+  const isAdmin = role === "SYSTEM_ADMIN";
 
   const viewParam = (sp.get("view") || "").toLowerCase();
 
   const listView = useMemo(() => {
+    // PM can see their own requests
     if (isPM && viewParam === "my") return "my";
-    if (viewParam === "review") return "review";
+
+    // ✅ Review queue is for PO (and Admin)
+    if ((isPO || isAdmin) && viewParam === "review") return "review";
+
+    // default
     return "all";
-  }, [isPM, viewParam]);
+  }, [isPM, isPO, isAdmin, viewParam]);
 
   if (loading) return <div className="p-6 text-slate-300">Loading...</div>;
 
@@ -45,31 +53,37 @@ export default function RequestsClient() {
     );
   }
 
+  const viewLabel =
+    listView === "my"
+      ? "My Requests"
+      : listView === "review"
+        ? "Review Queue"
+        : "All Requests";
+
   return (
     <main className="space-y-5">
-      {isPM && !showForm && (
+      {/* Header: show for PM (create) or PO/Admin (review label) */}
+      {(isPM || isPO || isAdmin) && !showForm && (
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm text-slate-300">
             Showing:{" "}
-            <span className="text-slate-100 font-semibold">
-              {listView === "my"
-                ? "My Requests"
-                : listView === "review"
-                  ? "Review Queue"
-                  : "All Requests"}
-            </span>
+            <span className="text-slate-100 font-semibold">{viewLabel}</span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowForm(true)}
-            className="px-4 py-2 rounded-xl bg-emerald-500 text-black text-sm shadow hover:bg-emerald-400"
-          >
-            + New Service Request
-          </button>
+          {/* ✅ Only PM can create requests */}
+          {isPM && (
+            <button
+              type="button"
+              onClick={() => setShowForm(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-500 text-black text-sm shadow hover:bg-emerald-400"
+            >
+              + New Service Request
+            </button>
+          )}
         </div>
       )}
 
+      {/* ✅ Only PM can open the form */}
       {isPM && showForm && (
         <ServiceRequestForm
           onCreated={() => {

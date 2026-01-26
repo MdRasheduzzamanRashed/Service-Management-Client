@@ -89,6 +89,9 @@ export default function Navbar() {
   const isAdmin = role === "SYSTEM_ADMIN";
   const isProvider = role === "SERVICE_PROVIDER";
 
+  // after swap:
+  // PO = reviewer + evaluator
+  // RP = ordering
   const canSeeAdminMenu = isPM || isRP || isPO || isAdmin;
 
   const navItems = useMemo(() => {
@@ -99,6 +102,7 @@ export default function Navbar() {
       ];
     }
 
+    // PM menu (owner)
     if (isPM) {
       return [
         { href: "/dashboard", label: "Dashboard" },
@@ -109,10 +113,12 @@ export default function Navbar() {
       ];
     }
 
+    // Service Provider menu
     if (isProvider) {
       return [{ href: "/sp/bidding", label: "Bidding Requests" }];
     }
 
+    // Admin/RP/PO menu
     if (canSeeAdminMenu) {
       return [
         { href: "/dashboard", label: "Dashboard" },
@@ -120,13 +126,21 @@ export default function Navbar() {
         { href: "/contracts", label: "Contracts" },
         { href: "/requests", label: "All Requests" },
 
-        // ✅ only PO can see orders menu
-        ...(isPO ? [{ href: "/orders", label: "My Orders" }] : []),
+        // ✅ after swap: RP places orders, so RP sees orders menu
+        ...(isRP ? [{ href: "/orders", label: "My Orders" }] : []),
+
+        // ✅ optional quick links for PO (review + evaluation)
+        ...(isPO
+          ? [
+              { href: "/requests?status=IN_REVIEW", label: "In Review" },
+              { href: "/requests?status=BID_EVALUATION", label: "Evaluation" },
+            ]
+          : []),
       ];
     }
 
     return [{ href: "/dashboard", label: "Dashboard" }];
-  }, [isLoggedIn, isPM, isProvider, canSeeAdminMenu, isPO]);
+  }, [isLoggedIn, isPM, isProvider, canSeeAdminMenu, isRP, isPO]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/80 backdrop-blur">

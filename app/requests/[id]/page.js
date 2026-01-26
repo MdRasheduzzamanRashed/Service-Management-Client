@@ -13,6 +13,9 @@ import Link from "next/link";
 import { AuthContext } from "../../../context/AuthContext";
 import { apiGet, apiPost } from "../../../lib/api";
 
+/* =========================
+   Utils
+========================= */
 function normalizeRole(raw) {
   return String(raw || "")
     .trim()
@@ -24,13 +27,40 @@ function normalizeUsername(raw) {
     .trim()
     .toLowerCase();
 }
-function fmtDate(v) {
+function fmtDateTime(v) {
   if (!v) return "—";
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString();
 }
+function fmtDateOnly(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString();
+}
+function idStr(x) {
+  if (!x) return "";
+  if (typeof x === "string") return x;
+  if (x?.$oid) return String(x.$oid);
+  try {
+    return String(x);
+  } catch {
+    return "";
+  }
+}
+function getErrMsg(e) {
+  return (
+    e?.response?.data?.error ||
+    e?.response?.data?.message ||
+    e?.message ||
+    "Request failed"
+  );
+}
 
+/* =========================
+   UI
+========================= */
 function StatusBadge({ status }) {
   const s = String(status || "").toUpperCase();
   const cls =
@@ -45,7 +75,7 @@ function StatusBadge({ status }) {
             : s === "BID_EVALUATION"
               ? "bg-amber-950/40 border-amber-800/40 text-amber-200"
               : s === "RECOMMENDED"
-                ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-200"
+                ? "bg-teal-950/40 border-teal-800/40 text-teal-200"
                 : s === "SENT_TO_PO"
                   ? "bg-indigo-950/40 border-indigo-800/40 text-indigo-200"
                   : s === "ORDERED"
@@ -64,7 +94,6 @@ function StatusBadge({ status }) {
     </span>
   );
 }
-
 
 function Timeline({ steps }) {
   return (
@@ -92,6 +121,9 @@ function Timeline({ steps }) {
   );
 }
 
+/* =========================
+   Page
+========================= */
 export default function RequestDetailPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -99,12 +131,14 @@ export default function RequestDetailPage() {
 
   const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
   const username = useMemo(
-    () => normalizeUsername(user?.username),
-    [user?.username],
+    () => normalizeUsername(user?.username || user?.displayUsername),
+    [user?.username, user?.displayUsername],
   );
 
   const isPM = role === "PROJECT_MANAGER";
-  const isRP = role === "RESOURCE_PLANNER";
+  const isPO = role === "PROCUREMENT_OFFICER"; // ✅ reviewer + evaluator
+  const isRP = role === "RESOURCE_PLANNER"; // ✅ ordering
+  const isAdmin = role === "SYSTEM_ADMIN";
 
   const [req, setReq] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -121,13 +155,14 @@ export default function RequestDetailPage() {
     try {
       setLoading(true);
       setErr("");
-      const res = await apiGet(`/requests/${id}`, { headers: authHeaders });
+      const res = await apiGet(`/requests/${encodeURIComponent(String(id))}`, {
+        headers: authHeaders,
+        params: { _t: Date.now() },
+      });
       setReq(res?.data || null);
     } catch (e) {
       setReq(null);
-      setErr(
-        e?.response?.data?.error || e?.message || "Failed to load request",
-      );
+      setErr(getErrMsg(e));
     } finally {
       setLoading(false);
     }
@@ -141,6 +176,7 @@ export default function RequestDetailPage() {
     () => String(req?.status || "").toUpperCase(),
     [req?.status],
   );
+
   const isExpired = status === "EXPIRED";
 
   const isOwner = useMemo(() => {
@@ -148,12 +184,23 @@ export default function RequestDetailPage() {
     return normalizeUsername(req?.createdBy) === username;
   }, [isPM, req?.createdBy, username]);
 
-  // ✅ action availability (your workflow)
+  // ✅ actions
   const canEdit = isOwner && status === "DRAFT";
   const canSubmitForReview = isOwner && status === "DRAFT";
   const canSubmitForBidding = isOwner && status === "APPROVED_FOR_SUBMISSION";
-  const canRpApprove = isRP && status === "IN_REVIEW";
-  const canRpReject = isRP && status === "IN_REVIEW";
+
+  // ✅ SWAPPED: PO does approve/reject during IN_REVIEW
+  const canApprove = (isPO || isAdmin) && status === "IN_REVIEW";
+  const canReject = (isPO || isAdmin) && status === "IN_REVIEW";
+
+  // ✅ SWAPPED: PO evaluates at BID_EVALUATION
+  const canEvaluate = (isPO || isAdmin) && status === "BID_EVALUATION";
+
+  // ✅ PM sends to PO at RECOMMENDED
+  const canSendToPO = (isPM || isAdmin) && status === "RECOMMENDED";
+
+  // ✅ RP orders at SENT_TO_PO
+  const canOrder = (isRP || isAdmin) && status === "SENT_TO_PO";
 
   // ✅ EXPIRED: disable everything automatically (except reactivate for owner PM)
   const actionsDisabled = actionLoading || isExpired;
@@ -169,11 +216,19 @@ export default function RequestDetailPage() {
       setActionLoading(true);
 
       try {
-        await apiPost(url, body || {}, { headers: authHeaders });
-        await load();
+        const res = await apiPost(url, body || {}, {
+          headers: authHeaders,
+          params: { _t: Date.now() },
+        });
+
+        // some endpoints may return updated request; use it if present
+        const updated = res?.data?.request || res?.data || null;
+        if (updated && updated?._id) setReq(updated);
+        else await load();
+
         setActionMsg(okMsg || "Done.");
       } catch (e) {
-        setActionMsg(e?.response?.data?.error || e?.message || "Action failed");
+        setActionMsg(getErrMsg(e));
       } finally {
         setActionLoading(false);
         lockRef.current = false;
@@ -182,164 +237,188 @@ export default function RequestDetailPage() {
     [id, headersReady, authHeaders, load],
   );
 
-const timelineSteps = useMemo(() => {
-  if (!req) return [];
-  const steps = [];
-  const st = String(req.status || "").toUpperCase();
+  const recommendedOfferId = useMemo(
+    () => idStr(req?.recommendedOfferId),
+    [req?.recommendedOfferId],
+  );
 
-  steps.push({
-    title: "Created",
-    badge: "DRAFT",
-    time: fmtDate(req.createdAt),
-    note: req.createdBy ? `Created by ${req.createdBy}` : "",
-  });
+  const timelineSteps = useMemo(() => {
+    if (!req) return [];
+    const steps = [];
+    const st = String(req.status || "").toUpperCase();
 
-  if (req.submittedAt) {
     steps.push({
-      title: "Submitted for review",
-      badge: "IN_REVIEW",
-      time: fmtDate(req.submittedAt),
-      note: req.submittedBy ? `Submitted by ${req.submittedBy}` : "",
-    });
-  }
-
-  if (req.rpApprovedAt) {
-    steps.push({
-      title: "Approved by Resource Planner",
-      badge: "APPROVED_FOR_SUBMISSION",
-      time: fmtDate(req.rpApprovedAt),
-      note: req.rpApprovedBy ? `Approved by ${req.rpApprovedBy}` : "",
-    });
-  }
-
-  if (req.rpRejectedAt) {
-    steps.push({
-      title: "Rejected by Resource Planner",
-      badge: "REJECTED",
-      time: fmtDate(req.rpRejectedAt),
-      note: req.rpRejectReason ? `Reason: ${req.rpRejectReason}` : "",
-    });
-  }
-
-  if (req.biddingStartedAt) {
-    steps.push({
-      title: "Bidding started",
-      badge: "BIDDING",
-      time: fmtDate(req.biddingStartedAt),
-      note: req.biddingStartedBy ? `Started by ${req.biddingStartedBy}` : "",
-    });
-  }
-
-  // ✅ BID_EVALUATION
-  if (req.bidEvaluationAt) {
-    steps.push({
-      title: "Bidding completed",
-      badge: "BID_EVALUATION",
-      time: fmtDate(req.bidEvaluationAt),
-      note:
-        req.offersCount != null && req.maxOffers != null
-          ? `Offers collected: ${req.offersCount}/${req.maxOffers}`
-          : "Moved to evaluation stage.",
-    });
-  } else if (st === "BID_EVALUATION") {
-    steps.push({
-      title: "Bidding completed",
-      badge: "BID_EVALUATION",
-      time: "—",
-      note: "Moved to evaluation stage.",
-    });
-  }
-
-  // ✅ RECOMMENDED
-  if (req.recommendedAt) {
-    steps.push({
-      title: "Offer recommended by Resource Planner",
-      badge: "RECOMMENDED",
-      time: fmtDate(req.recommendedAt),
-      note: [
-        req.recommendedBy ? `Recommended by ${req.recommendedBy}` : "",
-        req.recommendedOfferId ? `Offer ID: ${req.recommendedOfferId}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    });
-  } else if (st === "RECOMMENDED") {
-    steps.push({
-      title: "Offer recommended by Resource Planner",
-      badge: "RECOMMENDED",
-      time: "—",
-      note: req.recommendedOfferId ? `Offer ID: ${req.recommendedOfferId}` : "",
-    });
-  }
-
-  // ✅ SENT_TO_PO
-  if (req.sentToPoAt) {
-    steps.push({
-      title: "Sent to Procurement Officer",
-      badge: "SENT_TO_PO",
-      time: fmtDate(req.sentToPoAt),
-      note: req.sentToPoBy ? `Sent by ${req.sentToPoBy}` : "",
-    });
-  } else if (st === "SENT_TO_PO") {
-    steps.push({
-      title: "Sent to Procurement Officer",
-      badge: "SENT_TO_PO",
-      time: "—",
-      note: "",
-    });
-  }
-
-  // ✅ ORDERED
-  if (req.orderedAt) {
-    steps.push({
-      title: "Order placed",
-      badge: "ORDERED",
-      time: fmtDate(req.orderedAt),
-      note: [
-        req.orderedBy ? `Ordered by ${req.orderedBy}` : "",
-        req.orderId ? `Order ID: ${req.orderId}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    });
-  } else if (st === "ORDERED") {
-    steps.push({
-      title: "Order placed",
-      badge: "ORDERED",
-      time: "—",
-      note: req.orderId ? `Order ID: ${req.orderId}` : "",
-    });
-  }
-
-  // ✅ EXPIRED + REACTIVATED stays same
-  if (req.expiredAt) {
-    steps.push({
-      title: "Expired",
-      badge: "EXPIRED",
-      time: fmtDate(req.expiredAt),
-      note: "Bidding cycle completed.",
-    });
-  } else if (!req.expiredAt && st === "EXPIRED") {
-    steps.push({
-      title: "Expired",
-      badge: "EXPIRED",
-      time: "—",
-      note: "Bidding cycle completed.",
-    });
-  }
-
-  if (req.reactivatedAt) {
-    steps.push({
-      title: "Reactivated",
+      title: "Created",
       badge: "DRAFT",
-      time: fmtDate(req.reactivatedAt),
-      note: req.reactivatedBy ? `Reactivated by ${req.reactivatedBy}` : "",
+      time: fmtDateTime(req.createdAt),
+      note: req.createdBy ? `Created by ${req.createdBy}` : "",
     });
-  }
 
-  return steps;
-}, [req]);
+    if (req.submittedAt) {
+      steps.push({
+        title: "Submitted for review",
+        badge: "IN_REVIEW",
+        time: fmtDateTime(req.submittedAt),
+        note: req.submittedBy ? `Submitted by ${req.submittedBy}` : "",
+      });
+    }
 
+    // stored as rpApprovedAt in DB but shown as PO due to swapped workflow
+    if (req.rpApprovedAt) {
+      steps.push({
+        title: "Approved by Procurement Officer",
+        badge: "APPROVED_FOR_SUBMISSION",
+        time: fmtDateTime(req.rpApprovedAt),
+        note: req.rpApprovedBy ? `Approved by ${req.rpApprovedBy}` : "",
+      });
+    }
+
+    if (req.rpRejectedAt) {
+      steps.push({
+        title: "Rejected by Procurement Officer",
+        badge: "REJECTED",
+        time: fmtDateTime(req.rpRejectedAt),
+        note: req.rpRejectReason ? `Reason: ${req.rpRejectReason}` : "",
+      });
+    }
+
+    if (req.biddingStartedAt) {
+      steps.push({
+        title: "Bidding started",
+        badge: "BIDDING",
+        time: fmtDateTime(req.biddingStartedAt),
+        note: req.biddingStartedBy ? `Started by ${req.biddingStartedBy}` : "",
+      });
+    }
+
+    if (req.bidEvaluationAt) {
+      steps.push({
+        title: "Bidding completed",
+        badge: "BID_EVALUATION",
+        time: fmtDateTime(req.bidEvaluationAt),
+        note:
+          req.offersCount != null && req.maxOffers != null
+            ? `Offers collected: ${req.offersCount}/${req.maxOffers}`
+            : "Moved to evaluation stage.",
+      });
+    } else if (st === "BID_EVALUATION") {
+      steps.push({
+        title: "Bidding completed",
+        badge: "BID_EVALUATION",
+        time: "—",
+        note: "Moved to evaluation stage.",
+      });
+    }
+
+    if (req.recommendedAt) {
+      steps.push({
+        title: "Offer recommended by Procurement Officer",
+        badge: "RECOMMENDED",
+        time: fmtDateTime(req.recommendedAt),
+        note: [
+          req.recommendedBy ? `Recommended by ${req.recommendedBy}` : "",
+          req.recommendedOfferId ? `Offer ID: ${req.recommendedOfferId}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+    } else if (st === "RECOMMENDED") {
+      steps.push({
+        title: "Offer recommended by Procurement Officer",
+        badge: "RECOMMENDED",
+        time: "—",
+        note: req.recommendedOfferId
+          ? `Offer ID: ${req.recommendedOfferId}`
+          : "",
+      });
+    }
+
+    if (req.sentToPoAt) {
+      steps.push({
+        title: "Sent to ordering stage",
+        badge: "SENT_TO_PO",
+        time: fmtDateTime(req.sentToPoAt),
+        note: req.sentToPoBy ? `Sent by ${req.sentToPoBy}` : "",
+      });
+    } else if (st === "SENT_TO_PO") {
+      steps.push({
+        title: "Sent to ordering stage",
+        badge: "SENT_TO_PO",
+        time: "—",
+        note: "",
+      });
+    }
+
+    if (req.orderedAt) {
+      steps.push({
+        title: "Order placed",
+        badge: "ORDERED",
+        time: fmtDateTime(req.orderedAt),
+        note: [
+          req.orderedBy ? `Ordered by ${req.orderedBy}` : "",
+          req.orderId ? `Order ID: ${req.orderId}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+    } else if (st === "ORDERED") {
+      steps.push({
+        title: "Order placed",
+        badge: "ORDERED",
+        time: "—",
+        note: req.orderId ? `Order ID: ${req.orderId}` : "",
+      });
+    }
+
+    if (req.expiredAt) {
+      steps.push({
+        title: "Expired",
+        badge: "EXPIRED",
+        time: fmtDateTime(req.expiredAt),
+        note: "Bidding cycle completed.",
+      });
+    } else if (!req.expiredAt && st === "EXPIRED") {
+      steps.push({
+        title: "Expired",
+        badge: "EXPIRED",
+        time: "—",
+        note: "Bidding cycle completed.",
+      });
+    }
+
+    if (req.reactivatedAt) {
+      steps.push({
+        title: "Reactivated",
+        badge: "DRAFT",
+        time: fmtDateTime(req.reactivatedAt),
+        note: req.reactivatedBy ? `Reactivated by ${req.reactivatedBy}` : "",
+      });
+    }
+
+    return steps;
+  }, [req]);
+
+  // languages display (supports both shapes)
+  const languagesText = useMemo(() => {
+    const a = req?.requiredLanguagesWithLevel;
+    if (Array.isArray(a) && a.length) {
+      return a
+        .map((x) => {
+          const lang =
+            typeof x === "string" ? x : String(x?.language || x?.name || "");
+          const lvl = typeof x === "object" ? String(x?.level || "") : "";
+          const s = `${lang}`.trim();
+          if (!s) return "";
+          return lvl ? `${s} (${lvl})` : s;
+        })
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    const b = req?.requiredLanguages;
+    if (Array.isArray(b) && b.length) return b.filter(Boolean).join(", ");
+    return "";
+  }, [req]);
 
   if (!headersReady) {
     return <div className="p-4 text-xs text-amber-300">Loading session…</div>;
@@ -374,7 +453,7 @@ const timelineSteps = useMemo(() => {
             <div className="mt-1 flex items-center gap-2 text-xs flex-wrap">
               <StatusBadge status={req.status} />
               <span className="text-slate-400">
-                Created {fmtDate(req.createdAt)}{" "}
+                Created {fmtDateTime(req.createdAt)}{" "}
                 {req.createdBy ? `by ${req.createdBy}` : ""}
               </span>
             </div>
@@ -425,29 +504,31 @@ const timelineSteps = useMemo(() => {
             </button>
           )}
 
-          {canRpApprove && (
+          {canApprove && (
             <button
               type="button"
               disabled={actionsDisabled}
               onClick={() =>
                 runAction({
+                  // ✅ keep backend route name
                   url: `/requests/${id}/rp-approve`,
                   okMsg: "Approved for submission.",
                 })
               }
               className="px-3 py-1.5 text-xs rounded-full bg-emerald-500 text-black hover:bg-emerald-400 disabled:opacity-60"
             >
-              RP: Approve
+              PO: Approve
             </button>
           )}
 
-          {canRpReject && (
+          {canReject && (
             <button
               type="button"
               disabled={actionsDisabled}
               onClick={() => {
                 const reason = prompt("Reject reason?", "Not suitable") || "";
                 runAction({
+                  // ✅ keep backend route name
                   url: `/requests/${id}/rp-reject`,
                   body: { reason },
                   okMsg: "Rejected.",
@@ -455,7 +536,7 @@ const timelineSteps = useMemo(() => {
               }}
               className="px-3 py-1.5 text-xs rounded-full bg-red-500 text-black hover:bg-red-400 disabled:opacity-60"
             >
-              RP: Reject
+              PO: Reject
             </button>
           )}
 
@@ -472,6 +553,58 @@ const timelineSteps = useMemo(() => {
               className="px-3 py-1.5 text-xs rounded-full bg-purple-500 text-black hover:bg-purple-400 disabled:opacity-60"
             >
               PM: Submit for Bidding
+            </button>
+          )}
+
+          {/* ✅ Evaluate link (PO + Admin) */}
+          {canEvaluate && (
+            <Link
+              href={`/requests/${encodeURIComponent(String(id))}/evaluation`}
+              className="px-3 py-1.5 text-xs rounded-full bg-amber-400 text-black hover:bg-amber-300"
+            >
+              PO: Evaluate Offers
+            </Link>
+          )}
+
+          {/* ✅ PM sends to PO at RECOMMENDED */}
+          {canSendToPO && (
+            <button
+              type="button"
+              disabled={actionsDisabled}
+              onClick={() =>
+                runAction({
+                  url: `/requests/${id}/send-to-po`,
+                  okMsg: "Sent to ordering stage.",
+                })
+              }
+              className="px-3 py-1.5 text-xs rounded-full bg-indigo-400 text-black hover:bg-indigo-300 disabled:opacity-60"
+            >
+              PM: Send to PO
+            </button>
+          )}
+
+          {/* ✅ RP places order at SENT_TO_PO */}
+          {canOrder && (
+            <button
+              type="button"
+              disabled={
+                actionsDisabled ||
+                (!recommendedOfferId && !req?.recommendedOfferId)
+              }
+              onClick={() =>
+                runAction({
+                  url: `/requests/${id}/order`,
+                  body: {
+                    offerId:
+                      recommendedOfferId || req?.recommendedOfferId || "",
+                  },
+                  okMsg: "Order placed.",
+                })
+              }
+              className="px-3 py-1.5 text-xs rounded-full bg-emerald-400 text-black hover:bg-emerald-300 disabled:opacity-60"
+              title={!recommendedOfferId ? "No recommended offer id found" : ""}
+            >
+              RP: Place Order
             </button>
           )}
 
@@ -493,7 +626,17 @@ const timelineSteps = useMemo(() => {
         </div>
 
         {actionMsg && (
-          <div className="text-[12px] text-emerald-200">{actionMsg}</div>
+          <div
+            className={`text-[12px] ${
+              actionMsg.toLowerCase().includes("fail") ||
+              actionMsg.toLowerCase().includes("missing") ||
+              actionMsg.toLowerCase().includes("error")
+                ? "text-red-200"
+                : "text-emerald-200"
+            }`}
+          >
+            {actionMsg}
+          </div>
         )}
       </section>
 
@@ -504,15 +647,18 @@ const timelineSteps = useMemo(() => {
 
       {/* BASIC INFO */}
       <Section title="General Information">
+        <Info label="Request ID" value={String(id)} />
         <Info label="Type" value={req.type} />
         <Info label="Project" value={req.projectName || req.projectId} />
+        <Info label="Contract" value={req.contractId} />
         <Info label="Supplier" value={req.contractSupplier} />
         <Info label="Performance Location" value={req.performanceLocation} />
-        <Info label="Start Date" value={req.startDate} />
-        <Info label="End Date" value={req.endDate} />
+        <Info label="Start Date" value={fmtDateOnly(req.startDate)} />
+        <Info label="End Date" value={fmtDateOnly(req.endDate)} />
         <Info label="Bidding Cycle (days)" value={req.biddingCycleDays} />
         <Info label="Max Offers" value={req.maxOffers} />
         <Info label="Max Accepted Offers" value={req.maxAcceptedOffers} />
+        <Info label="Recommended Offer ID" value={recommendedOfferId} />
       </Section>
 
       {/* ROLES */}
@@ -521,23 +667,35 @@ const timelineSteps = useMemo(() => {
           <table className="w-full text-sm border border-slate-800 rounded-xl">
             <thead className="bg-slate-950/60 text-[11px] text-slate-400">
               <tr>
-                <th className="px-3 py-2">Role</th>
-                <th className="px-3 py-2">Domain</th>
-                <th className="px-3 py-2">Technology</th>
-                <th className="px-3 py-2">Experience</th>
-                <th className="px-3 py-2">Man Days</th>
-                <th className="px-3 py-2">Onsite Days</th>
+                <th className="px-3 py-2 text-left">Role</th>
+                <th className="px-3 py-2 text-left">Domain</th>
+                <th className="px-3 py-2 text-left">Technology</th>
+                <th className="px-3 py-2 text-left">Experience</th>
+                <th className="px-3 py-2 text-left">Man Days</th>
+                <th className="px-3 py-2 text-left">Onsite Days</th>
               </tr>
             </thead>
             <tbody>
               {(req.roles || []).map((r, i) => (
                 <tr key={i} className="border-t border-slate-800">
-                  <td className="px-3 py-2">{r.roleName || "—"}</td>
-                  <td className="px-3 py-2">{r.domain || "—"}</td>
-                  <td className="px-3 py-2">{r.technology || "—"}</td>
-                  <td className="px-3 py-2">{r.experienceLevel || "—"}</td>
-                  <td className="px-3 py-2">{r.manDays ?? "—"}</td>
-                  <td className="px-3 py-2">{r.onsiteDays ?? "—"}</td>
+                  <td className="px-3 py-2 text-slate-200">
+                    {r.roleName || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">
+                    {r.domain || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">
+                    {r.technology || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">
+                    {r.experienceLevel || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">
+                    {r.manDays ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">
+                    {r.onsiteDays ?? "—"}
+                  </td>
                 </tr>
               ))}
               {(!req.roles || req.roles.length === 0) && (
@@ -554,10 +712,7 @@ const timelineSteps = useMemo(() => {
 
       {/* REQUIREMENTS */}
       <Section title="Requirements">
-        <Info
-          label="Required Languages"
-          value={(req.requiredLanguages || []).join(", ")}
-        />
+        <Info label="Required Languages" value={languagesText} />
         <Info
           label="Must Have"
           value={(req.mustHaveCriteria || []).join(", ")}
@@ -599,7 +754,9 @@ function Info({ label, value }) {
   return (
     <div className="grid grid-cols-3 gap-3 text-sm">
       <span className="text-slate-400">{label}</span>
-      <span className="col-span-2 text-slate-200">{value || "—"}</span>
+      <span className="col-span-2 text-slate-200 break-words">
+        {value || "—"}
+      </span>
     </div>
   );
 }

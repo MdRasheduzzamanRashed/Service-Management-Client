@@ -76,9 +76,10 @@ function DashboardContent() {
           </div>
         )}
 
-        {/* RP/Admin (but not PM) */}
-        {(isRP || canSeeAll) && !isPM && (
+        {/* ✅ PO/Admin (but not PM) — PO is Reviewer + Evaluator after swap */}
+        {(isPO || canSeeAll) && !isPM && (
           <div className="space-y-4">
+            {/* IN_REVIEW (Reviewer = PO) */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="text-sm font-semibold text-slate-100">
@@ -96,6 +97,25 @@ function DashboardContent() {
               </div>
             </div>
 
+            {/* BID_EVALUATION (Evaluator = PO) */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Requests For Evaluation
+                </h2>
+                <a
+                  href="/requests?status=BID_EVALUATION"
+                  className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                >
+                  Open
+                </a>
+              </div>
+              <div className="mt-3">
+                <RequestList view="bid-evaluation" />
+              </div>
+            </div>
+
+            {/* All */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="text-sm font-semibold text-slate-100">
@@ -115,13 +135,33 @@ function DashboardContent() {
           </div>
         )}
 
-        {/* PO/Admin (but not PM/RP) */}
-        {(isPO || canSeeAll) && !isPM && !isRP && (
+        {/* ✅ RP/Admin (but not PM and not PO) — RP is Ordering role after swap */}
+        {(isRP || canSeeAll) && !isPM && !isPO && (
           <div className="space-y-4">
+            {/* Orders (Ordering role = RP) */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
               <MyOrdersPage />
             </div>
 
+            {/* Requests ready for ordering (SENT_TO_PO) */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Requests Ready for Ordering
+                </h2>
+                <a
+                  href="/requests?status=SENT_TO_PO"
+                  className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+                >
+                  Open
+                </a>
+              </div>
+              <div className="mt-3">
+                <RequestList view="ordering" />
+              </div>
+            </div>
+
+            {/* All */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="text-sm font-semibold text-slate-100">

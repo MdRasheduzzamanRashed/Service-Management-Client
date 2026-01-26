@@ -3,6 +3,20 @@
 import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 
+/* =========================
+   Helpers
+========================= */
+function idStr(x) {
+  if (!x) return "";
+  if (typeof x === "string") return x;
+  if (x?.$oid) return String(x.$oid);
+  try {
+    return String(x);
+  } catch {
+    return "";
+  }
+}
+
 function toDateText(v) {
   if (!v) return "—";
   const d = new Date(v);
@@ -20,7 +34,7 @@ function asArray(v) {
   return [v];
 }
 
-// XML -> object converter output varies. This makes sure we handle:
+// Handles:
 // selectedSkills: { selectedSkills: ["Ethereum","Web3.js"] } OR ["Ethereum"] OR "Ethereum"
 function pickList(obj, key) {
   const val = obj?.[key];
@@ -41,32 +55,94 @@ function joinList(items, max = 3) {
   return rest > 0 ? `${shown.join(", ")} +${rest}` : shown.join(", ");
 }
 
-function StatusBadge({ status, isPublished }) {
-  const s = String(status || "")
+function normBool(v) {
+  if (typeof v === "boolean") return v;
+  const s = String(v || "")
     .trim()
     .toLowerCase();
+  if (s === "true") return true;
+  if (s === "false") return false;
+  return false;
+}
+
+function normStatus(v) {
+  return String(v || "")
+    .trim()
+    .toUpperCase();
+}
+
+/* =========================
+   Normalize project shape (NEW API)
+   - supports id, _id, $oid, projectId
+   - supports fields from your sample XML output
+========================= */
+function normalizeProject(raw) {
+  const p = raw || {};
+  const status = normStatus(p.status);
+
+  // New API already has isPublished, but keep fallback
+  const isPublished =
+    typeof p.isPublished === "boolean"
+      ? p.isPublished
+      : normBool(p.isPublished) || status === "PLANNED";
+
+  return {
+    ...p,
+
+    // normalized IDs
+    id: idStr(p.id || p._id || p.projectId),
+
+    // normalized main fields expected by UI
+    projectId: String(p.projectId || "").trim() || idStr(p.id || p._id) || "",
+    projectDescription:
+      p.projectDescription || p.title || p.name || p.projectId || "",
+    projectStart: p.projectStart || p.startDate || "",
+    projectEnd: p.projectEnd || p.endDate || "",
+    taskDescription: p.taskDescription || "",
+    requiredEmployees:
+      p.requiredEmployees != null && p.requiredEmployees !== ""
+        ? Number(p.requiredEmployees)
+        : null,
+
+    status: status || "",
+    isPublished,
+  };
+}
+
+function StatusBadge({ status, isPublished }) {
+  const s = normStatus(status);
 
   const base =
     "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border";
 
-  if (s === "active")
+  // ✅ new api: PLANNED is basically "Published/Active"
+  if (s === "PLANNED")
     return (
       <span
         className={`${base} border-emerald-400/40 text-emerald-300 bg-emerald-500/10`}
       >
-        Active
+        PLANNED
       </span>
     );
 
-  if (s === "expired")
+  if (s === "ACTIVE")
+    return (
+      <span
+        className={`${base} border-emerald-400/40 text-emerald-300 bg-emerald-500/10`}
+      >
+        ACTIVE
+      </span>
+    );
+
+  if (s === "EXPIRED")
     return (
       <span className={`${base} border-red-400/40 text-red-300 bg-red-500/10`}>
-        Expired
+        EXPIRED
       </span>
     );
 
   // If status empty, use publish state
-  if (s === "" || s === "—") {
+  if (!s) {
     return isPublished ? (
       <span
         className={`${base} border-emerald-400/40 text-emerald-300 bg-emerald-500/10`}
@@ -86,7 +162,7 @@ function StatusBadge({ status, isPublished }) {
     <span
       className={`${base} border-slate-500/40 text-slate-300 bg-slate-500/10`}
     >
-      {status || "Unknown"}
+      {s}
     </span>
   );
 }
@@ -102,14 +178,35 @@ function Field({ label, children }) {
   );
 }
 
-// ✅ Show ONLY role names (requiredRole) — not full role objects
-function RolesChips({ roles }) {
-  // roles can be: { roles: { requiredRole: ... } } OR { roles: [ ... ] } OR array
+/* =========================
+   Roles: robust parser for new api
+   Your XML-like sample:
+   roles: { roles: [ { requiredRole, requiredCompetencies, ... }, ... ] }
+========================= */
+function normalizeRolesInput(roles) {
+  // roles can be:
+  // - roles: { roles: [...] }
+  // - roles: { roles: { ... } }
+  // - roles: [...]
+  // - roles: { ... }
   const root = roles?.roles ?? roles;
   const items = Array.isArray(root) ? root : root ? [root] : [];
 
+  // sometimes xml converter wraps again: { roles: { requiredRole: ... } }
+  const flattened = [];
+  for (const it of items) {
+    const r = it?.roles ? it.roles : it;
+    if (Array.isArray(r)) flattened.push(...r);
+    else if (r) flattened.push(r);
+  }
+  return flattened.length ? flattened : items;
+}
+
+function RolesChips({ roles }) {
+  const items = normalizeRolesInput(roles);
+
   const names = items
-    .map((r) => r?.requiredRole || r?.role || r?.name)
+    .map((r) => r?.requiredRole || r?.role || r?.name || r?.roleName)
     .filter(Boolean)
     .map(String);
 
@@ -130,7 +227,7 @@ function RolesChips({ roles }) {
 }
 
 /* =========================
-   UI: Skeletons (UI only)
+   UI: Skeletons
 ========================= */
 function SkeletonLine({ w = "w-full" }) {
   return <div className={`h-3 ${w} rounded bg-slate-800/70 animate-pulse`} />;
@@ -224,7 +321,6 @@ function ProjectModal({ open, onClose, project }) {
 
         <div className="max-h-[75vh] overflow-y-auto px-4 sm:px-5 py-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {/* Main fields */}
             <Field label="Project ID">{project?.projectId || "—"}</Field>
             <Field label="Status">
               <StatusBadge
@@ -232,6 +328,7 @@ function ProjectModal({ open, onClose, project }) {
                 isPublished={project?.isPublished}
               />
             </Field>
+
             <Field label="Start">{toDateText(project?.projectStart)}</Field>
             <Field label="End">{toDateText(project?.projectEnd)}</Field>
 
@@ -256,11 +353,11 @@ function ProjectModal({ open, onClose, project }) {
                 {project?.links ? (
                   <a
                     className="text-emerald-300 hover:underline break-all"
-                    href={project.links}
+                    href={String(project.links)}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    {project.links}
+                    {String(project.links)}
                   </a>
                 ) : (
                   "—"
@@ -284,7 +381,6 @@ function ProjectModal({ open, onClose, project }) {
               </Field>
             </div>
 
-            {/* Other useful meta */}
             <Field label="External Search">
               {String(!!project?.isExternalSearch)}
             </Field>
@@ -307,8 +403,15 @@ function ProjectModal({ open, onClose, project }) {
   );
 }
 
+/* =========================
+   ProjectsExplorer
+========================= */
 export default function ProjectsExplorer({ initialProjects = [] }) {
-  const [projects] = useState(initialProjects);
+  // ✅ normalize incoming list once
+  const projects = useMemo(
+    () => (initialProjects || []).map(normalizeProject),
+    [initialProjects],
+  );
 
   const [tab, setTab] = useState("all"); // all | published | draft
   const [q, setQ] = useState("");
@@ -316,7 +419,7 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(null);
 
-  // UI-only: show skeleton once when initialProjects empty (optional)
+  // UI-only: show skeleton briefly when empty (optional)
   const [hydrating, setHydrating] = useState(false);
   useEffect(() => {
     if (initialProjects?.length) return;
@@ -327,7 +430,7 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
 
   const counts = useMemo(() => {
     const published = projects.filter(
-      (p) => p?.isPublished === true || String(p?.isPublished) === "true",
+      (p) => p?.isPublished === true || normStatus(p?.status) === "PLANNED",
     ).length;
     const draft = projects.length - published;
     return { all: projects.length, published, draft };
@@ -338,12 +441,10 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
 
     return projects
       .filter((p) => {
-        if (tab === "published")
-          return p?.isPublished === true || String(p?.isPublished) === "true";
-        if (tab === "draft")
-          return !(
-            p?.isPublished === true || String(p?.isPublished) === "true"
-          );
+        const pub =
+          p?.isPublished === true || normStatus(p?.status) === "PLANNED";
+        if (tab === "published") return pub;
+        if (tab === "draft") return !pub;
         return true;
       })
       .filter((p) => {
@@ -362,6 +463,11 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
           p?.links,
           skills,
           locations,
+          // roles searchable too
+          normalizeRolesInput(p?.roles)
+            .map((r) => r?.requiredRole || r?.role || r?.name)
+            .filter(Boolean)
+            .join(" "),
         ]
           .filter(Boolean)
           .join(" ")
@@ -393,7 +499,6 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
             </p>
           </div>
 
-          {/* Optional: quick back link (UI only) */}
           <div className="flex items-center gap-2">
             <Link
               href="/"
@@ -446,9 +551,8 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
           </div>
         </div>
 
-        {/* Cards (Responsive on all devices) */}
+        {/* Cards */}
         <div className="mt-5">
-          {/* Skeletons */}
           {hydrating && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -457,14 +561,12 @@ export default function ProjectsExplorer({ initialProjects = [] }) {
             </div>
           )}
 
-          {/* Empty */}
           {!hydrating && filtered.length === 0 && (
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-300">
               No projects found.
             </div>
           )}
 
-          {/* Cards */}
           {!hydrating && filtered.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {filtered.map((p) => {

@@ -11,6 +11,9 @@ import {
 
 export const AuthContext = createContext(null);
 
+/* =========================
+   Normalizers
+========================= */
 function normalizeId(raw) {
   if (!raw) return null;
   if (typeof raw === "string") return raw;
@@ -23,70 +26,132 @@ function normalizeId(raw) {
 }
 
 function normalizeRole(raw) {
-  return String(raw || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "_");
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s.toUpperCase().replace(/\s+/g, "_");
 }
 
 function normalizeUsername(raw) {
-  return String(raw || "")
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s.toLowerCase();
+}
+
+// If you only have "John Doe", create a safe fallback username
+function slugUsername(raw) {
+  const s = String(raw || "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return s || "";
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  /* =========================
+     Normalize user payload
+  ========================= */
   const normalizeUser = useCallback((payload) => {
     if (!payload || typeof payload !== "object") return null;
 
-    // ✅ accept {token, user:{...}} OR {...user, token}
-    const u =
+    // ✅ accept { token, user:{...} } OR { ...user, token }
+    const base =
       payload.user && typeof payload.user === "object"
         ? { ...payload.user, token: payload.token || payload.user.token }
         : payload;
 
-    const _id = normalizeId(u._id || u.id || u.userId);
-    const role = normalizeRole(u.role || u.userRole);
+    const _id = normalizeId(base._id || base.id || base.userId);
 
-    const token = u.token || u.accessToken || u.jwt || null;
+    // ✅ role
+    const role = normalizeRole(base.role || base.userRole);
 
-    // ✅ username fallback (IMPORTANT)
+    // ✅ token
+    const token = base.token || base.accessToken || base.jwt || null;
+
+    // ✅ display name (nice to show in UI)
     const displayUsername =
-      u.displayUsername || u.display_name || u.name || null;
-    const usernameRaw =
-      u.username ||
-      u.userName ||
-      u.handle ||
-      u.email || // fallback if you use email
-      displayUsername;
+      base.displayUsername ||
+      base.display_name ||
+      base.fullName ||
+      base.name ||
+      null;
 
-    const username = usernameRaw ? normalizeUsername(usernameRaw) : null;
+    // ✅ username (IMPORTANT for your backend auth headers)
+    // Priority: username -> handle -> email prefix -> employeeId -> displayUsername slug
+    let usernameRaw =
+      base.username ||
+      base.userName ||
+      base.handle ||
+      (base.email ? String(base.email).split("@")[0] : "") ||
+      base.employeeId ||
+      displayUsername ||
+      "";
+
+    // normalize + slug fallback
+    let username = normalizeUsername(usernameRaw);
+    if (!username) username = slugUsername(usernameRaw);
+
+    // If still empty, keep null (so you can detect and force re-login)
+    username = username || null;
 
     return {
-      ...u,
+      ...base,
       _id,
-      role,
+      role: role || null,
       token,
       username,
       displayUsername: displayUsername || username || null,
     };
   }, []);
 
+  /* =========================
+     Load from localStorage
+  ========================= */
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     try {
       const saved = window.localStorage.getItem("user");
-      setUser(saved ? normalizeUser(JSON.parse(saved)) : null);
+      if (!saved) {
+        setUser(null);
+        return;
+      }
+
+      const parsed = JSON.parse(saved);
+      setUser(normalizeUser(parsed));
     } catch {
+      // corrupted storage
+      window.localStorage.removeItem("user");
       setUser(null);
     } finally {
       setLoading(false);
     }
   }, [normalizeUser]);
 
+  // optional: sync across tabs
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    function onStorage(e) {
+      if (e.key !== "user") return;
+      try {
+        const next = e.newValue ? normalizeUser(JSON.parse(e.newValue)) : null;
+        setUser(next);
+      } catch {
+        setUser(null);
+      }
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [normalizeUser]);
+
+  /* =========================
+     Actions
+  ========================= */
   const loginUser = useCallback(
     (data) => {
       if (typeof window === "undefined") return;
@@ -104,14 +169,23 @@ export function AuthProvider({ children }) {
     window.location.assign("/auth/login");
   }, []);
 
+  /* =========================
+     Headers for backend
+  ========================= */
   const authHeaders = useMemo(() => {
     const headers = {};
+
+    // If you later enforce JWT middleware, keep this:
     if (user?.token) headers.Authorization = `Bearer ${user.token}`;
+
     if (user?.role) headers["x-user-role"] = normalizeRole(user.role);
+
+    // Your routes frequently require this:
     if (user?.username)
       headers["x-username"] = normalizeUsername(user.username);
+
     return headers;
-  }, [user]);
+  }, [user?.token, user?.role, user?.username]);
 
   const isLoggedIn = !!(user?.token || user?.role);
 

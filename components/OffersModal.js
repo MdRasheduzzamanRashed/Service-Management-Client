@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useContext, useCallback } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { AuthContext } from "../context/AuthContext";
-import { apiGet } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 
 /* =========================
    Helpers
@@ -55,10 +55,31 @@ function riskBadge(risk) {
   return `${base} border-slate-700 text-slate-300 bg-slate-900`;
 }
 
+function statusBadgeClass(status) {
+  const s = String(status || "").toUpperCase();
+  const base =
+    "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border";
+  if (s === "BIDDING")
+    return `${base} border-amber-500/40 text-amber-300 bg-amber-500/10`;
+  if (s === "BID_EVALUATION")
+    return `${base} border-sky-500/40 text-sky-300 bg-sky-500/10`;
+  if (s === "RECOMMENDED")
+    return `${base} border-emerald-500/40 text-emerald-300 bg-emerald-500/10`;
+  if (s === "SENT_TO_PO")
+    return `${base} border-indigo-500/40 text-indigo-300 bg-indigo-500/10`;
+  if (s === "ORDERED")
+    return `${base} border-green-500/40 text-green-300 bg-green-500/10`;
+  if (s === "REJECTED")
+    return `${base} border-red-500/40 text-red-300 bg-red-500/10`;
+  if (s === "EXPIRED")
+    return `${base} border-slate-600 text-slate-200 bg-slate-900`;
+  return `${base} border-slate-700 text-slate-300 bg-slate-900`;
+}
+
 /* =========================
    OffersModal
 ========================= */
-export default function OffersModal({ reqDoc, onClose }) {
+export default function OffersModal({ reqDoc, onClose, onUpdated }) {
   const { user, authHeaders } = useContext(AuthContext);
   const role = roleUpper(user?.role);
 
@@ -67,10 +88,15 @@ export default function OffersModal({ reqDoc, onClose }) {
   const [offers, setOffers] = useState([]);
   const [req, setReq] = useState(reqDoc || null);
   const [loading, setLoading] = useState(false);
+  const [acting, setActing] = useState(false);
   const [err, setErr] = useState("");
   const [selectedOfferId, setSelectedOfferId] = useState("");
 
-  const canEvaluate = role === "RESOURCE_PLANNER";
+  // ✅ SWAP FIX:
+  // - PO recommends offer (BID_EVALUATION -> RECOMMENDED)
+  // - RP orders (SENT_TO_PO -> ORDERED)
+  const canRecommend = role === "PROCUREMENT_OFFICER";
+  const canOrder = role === "RESOURCE_PLANNER";
 
   const requestStatus = useMemo(() => roleUpper(req?.status), [req?.status]);
   const recommendedOfferId = useMemo(
@@ -109,8 +135,10 @@ export default function OffersModal({ reqDoc, onClose }) {
       setReq(freshReq);
       setOffers(list);
 
+      // keep selection stable
       const recId = idStr(freshReq?.recommendedOfferId);
-      setSelectedOfferId(recId || idStr(list?.[0]?._id) || "");
+      const fallback = idStr(list?.[0]?._id);
+      setSelectedOfferId((prev) => prev || recId || fallback || "");
 
       toast.success("Offers loaded", { id: toastId });
     } catch (e) {
@@ -132,22 +160,108 @@ export default function OffersModal({ reqDoc, onClose }) {
     return offers.find((o) => idStr(o?._id) === idStr(selectedOfferId)) || null;
   }, [offers, selectedOfferId]);
 
-  const statusBadge = useMemo(() => {
-    const s = requestStatus || "—";
-    const base =
-      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border";
-    if (s === "BIDDING")
-      return `${base} border-amber-500/40 text-amber-300 bg-amber-500/10`;
-    if (s === "BID_EVALUATION")
-      return `${base} border-sky-500/40 text-sky-300 bg-sky-500/10`;
-    if (s === "RECOMMENDED")
-      return `${base} border-emerald-500/40 text-emerald-300 bg-emerald-500/10`;
-    if (s === "SENT_TO_PO")
-      return `${base} border-indigo-500/40 text-indigo-300 bg-indigo-500/10`;
-    if (s === "ORDERED")
-      return `${base} border-green-500/40 text-green-300 bg-green-500/10`;
-    return `${base} border-slate-700 text-slate-300 bg-slate-900`;
-  }, [requestStatus]);
+  const statusBadge = useMemo(
+    () => statusBadgeClass(requestStatus),
+    [requestStatus],
+  );
+
+  const canOpenEvaluation =
+    role === "PROCUREMENT_OFFICER" || role === "SYSTEM_ADMIN";
+
+  const showRecommendButton =
+    canRecommend && requestStatus === "BID_EVALUATION" && !!selectedOfferId;
+
+  const showOrderButton =
+    canOrder &&
+    requestStatus === "SENT_TO_PO" &&
+    !!(recommendedOfferId || selectedOfferId);
+
+  const handleRecommend = useCallback(async () => {
+    if (!requestId) return;
+    if (!selectedOfferId) return;
+
+    const t = toast.loading("Recommending offer...");
+    setActing(true);
+    setErr("");
+
+    try {
+      // ✅ backend supports /po-recommend-offer (and legacy /rp-recommend-offer if you add it)
+      const res = await apiPost(
+        `/requests/${encodeURIComponent(requestId)}/po-recommend-offer`,
+        { offerId: selectedOfferId },
+        { headers: authHeaders },
+      );
+
+      const freshReq = res?.data?.request || null;
+      const freshOffers = Array.isArray(res?.data?.offers)
+        ? res.data.offers
+        : offers;
+
+      setReq(freshReq);
+      setOffers(freshOffers);
+
+      const rec = idStr(freshReq?.recommendedOfferId) || selectedOfferId;
+      setSelectedOfferId(rec);
+
+      toast.success("Offer recommended", { id: t });
+
+      if (typeof onUpdated === "function") {
+        onUpdated({ request: freshReq, offers: freshOffers });
+      }
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error || e?.message || "Failed to recommend offer";
+      setErr(msg);
+      toast.error(msg, { id: t });
+    } finally {
+      setActing(false);
+      toast.dismiss(t);
+    }
+  }, [authHeaders, offers, onUpdated, requestId, selectedOfferId]);
+
+  const handleOrder = useCallback(async () => {
+    if (!requestId) return;
+
+    const offerIdToUse = recommendedOfferId || selectedOfferId;
+    if (!offerIdToUse) return;
+
+    const t = toast.loading("Placing order...");
+    setActing(true);
+    setErr("");
+
+    try {
+      const res = await apiPost(
+        `/requests/${encodeURIComponent(requestId)}/order`,
+        { offerId: offerIdToUse },
+        { headers: authHeaders },
+      );
+
+      const freshReq = res?.data?.request || null;
+      if (freshReq) setReq(freshReq);
+
+      toast.success("Order placed", { id: t });
+
+      if (typeof onUpdated === "function") {
+        onUpdated({ request: freshReq || req, offers });
+      }
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error || e?.message || "Failed to place order";
+      setErr(msg);
+      toast.error(msg, { id: t });
+    } finally {
+      setActing(false);
+      toast.dismiss(t);
+    }
+  }, [
+    authHeaders,
+    offers,
+    onUpdated,
+    recommendedOfferId,
+    requestId,
+    req,
+    selectedOfferId,
+  ]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
@@ -159,7 +273,7 @@ export default function OffersModal({ reqDoc, onClose }) {
               <h3 className="text-sm font-semibold text-slate-100">
                 Offers for: {req?.title || reqDoc?.title || "Untitled"}
               </h3>
-              <span className={statusBadge}>{requestStatus}</span>
+              <span className={statusBadge}>{requestStatus || "—"}</span>
             </div>
 
             <p className="text-[11px] text-slate-400">
@@ -174,8 +288,8 @@ export default function OffersModal({ reqDoc, onClose }) {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {canEvaluate && requestId && (
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {canOpenEvaluation && requestId && (
               <Link
                 href={`/requests/${encodeURIComponent(requestId)}/evaluation`}
                 className="px-3 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400"
@@ -184,10 +298,35 @@ export default function OffersModal({ reqDoc, onClose }) {
               </Link>
             )}
 
+            {showRecommendButton && (
+              <button
+                onClick={handleRecommend}
+                disabled={acting || loading}
+                className="px-3 py-2 rounded-xl bg-sky-500 text-black text-xs font-semibold hover:bg-sky-400 disabled:opacity-60"
+                type="button"
+                title="PO recommends the selected offer"
+              >
+                {acting ? "Working..." : "Recommend Offer"}
+              </button>
+            )}
+
+            {showOrderButton && (
+              <button
+                onClick={handleOrder}
+                disabled={acting || loading}
+                className="px-3 py-2 rounded-xl bg-indigo-500 text-black text-xs font-semibold hover:bg-indigo-400 disabled:opacity-60"
+                type="button"
+                title="RP places the order"
+              >
+                {acting ? "Working..." : "Place Order"}
+              </button>
+            )}
+
             <button
               onClick={loadAll}
-              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
+              className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-60"
               type="button"
+              disabled={loading || acting}
             >
               {loading ? "Loading..." : "Refresh"}
             </button>
@@ -196,6 +335,7 @@ export default function OffersModal({ reqDoc, onClose }) {
               onClick={onClose}
               className="px-3 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
               type="button"
+              disabled={acting}
             >
               Close
             </button>
@@ -212,15 +352,17 @@ export default function OffersModal({ reqDoc, onClose }) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {/* Offers list */}
           <div className="lg:col-span-2 rounded-2xl border border-slate-800 overflow-hidden">
-            <div className="bg-slate-950/60 px-3 py-2 flex items-center justify-between">
+            <div className="bg-slate-950/60 px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs text-slate-300">
                 Available offers:{" "}
                 <span className="text-slate-100 font-semibold">
                   {offers.length}
                 </span>
               </p>
+
+              {/* ✅ updated flow text */}
               <p className="text-[11px] text-slate-500">
-                RP evaluates → RP recommends → PM sends → PO orders
+                PO evaluates → PO recommends → PM sends → RP orders
               </p>
             </div>
 
@@ -259,6 +401,7 @@ export default function OffersModal({ reqDoc, onClose }) {
                             name="selectedOffer"
                             checked={isSel}
                             onChange={() => setSelectedOfferId(oid)}
+                            aria-label="Select offer"
                           />
                         </td>
 
@@ -333,7 +476,7 @@ export default function OffersModal({ reqDoc, onClose }) {
                 Select an offer to see details.
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="text-xs text-slate-400">
                   Provider:
                   <div className="text-slate-100 font-medium">
@@ -342,12 +485,80 @@ export default function OffersModal({ reqDoc, onClose }) {
                       "—"}
                   </div>
                 </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-2">
+                    <div className="text-[10px] text-slate-500">Price</div>
+                    <div className="text-xs text-slate-100 font-semibold">
+                      {fmtMoney(selectedOffer?.price, selectedOffer?.currency)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-2">
+                    <div className="text-[10px] text-slate-500">Delivery</div>
+                    <div className="text-xs text-slate-100 font-semibold">
+                      {selectedOffer?.deliveryDays ?? "—"} days
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-2">
+                    <div className="text-[10px] text-slate-500">Tech Score</div>
+                    <div className="text-xs text-slate-100 font-semibold">
+                      {fmtScore(selectedOffer?.scorecard?.technicalScore)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-2">
+                    <div className="text-[10px] text-slate-500">
+                      Commercial Score
+                    </div>
+                    <div className="text-xs text-slate-100 font-semibold">
+                      {fmtScore(selectedOffer?.scorecard?.commercialScore)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-400">
+                  Delivery Risk:
+                  <div className="mt-1">
+                    <span
+                      className={riskBadge(
+                        selectedOffer?.scorecard?.deliveryRisk,
+                      )}
+                    >
+                      {String(
+                        selectedOffer?.scorecard?.deliveryRisk || "—",
+                      ).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedOffer?.notes && (
+                  <div className="text-xs text-slate-400">
+                    Notes:
+                    <div className="mt-1 text-slate-200 whitespace-pre-wrap">
+                      {selectedOffer.notes}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             <div className="pt-2 border-t border-slate-800 space-y-1">
               <p className="text-[11px] text-slate-500">
                 Your role: <span className="text-slate-300">{role || "—"}</span>
+              </p>
+
+              <p className="text-[11px] text-slate-500">
+                You can{" "}
+                <span className="text-slate-200">
+                  {canRecommend
+                    ? "recommend (PO)"
+                    : canOrder
+                      ? "order (RP)"
+                      : "view"}
+                </span>{" "}
+                based on current status.
               </p>
             </div>
           </div>

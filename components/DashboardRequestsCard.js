@@ -1,8 +1,9 @@
 "use client";
 
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { createPortal } from "react-dom";
 import { AuthContext } from "../context/AuthContext";
 import { apiGet } from "../lib/api";
 
@@ -56,10 +57,90 @@ function statusNumberClass(statusKey, value) {
   }
 }
 
+/* =========================
+   Portal Hover Panel
+========================= */
+function HoverPanel({ open, anchorRect, title, total, counts }) {
+  if (!open || !anchorRect) return null;
+
+  const pad = 12;
+  const panelW = 360;
+  const panelH = 380; // approximate
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+
+  // prefer right side
+  let left = anchorRect.right + pad;
+  let top = anchorRect.top;
+
+  // fallback: left side
+  if (left + panelW > vw - pad) {
+    left = anchorRect.left - panelW - pad;
+  }
+
+  // fallback: below
+  if (left < pad) {
+    left = Math.min(Math.max(pad, anchorRect.left), vw - panelW - pad);
+    top = anchorRect.bottom + pad;
+  }
+
+  // clamp vertically
+  if (top + panelH > vh - pad) {
+    top = Math.max(pad, vh - panelH - pad);
+  }
+
+  const style = {
+    position: "fixed",
+    left,
+    top,
+    width: panelW,
+    zIndex: 99999,
+  };
+
+  return createPortal(
+    <div style={style}>
+      <div className="rounded-2xl border border-slate-700 bg-slate-950/98 shadow-2xl backdrop-blur px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-slate-400">
+            {title} · Status breakdown
+          </div>
+          <div className="text-xs text-slate-300">
+            Total: <span className="text-slate-100 font-semibold">{total}</span>
+          </div>
+        </div>
+
+        <div className="mt-3 max-h-64 overflow-auto pr-1 space-y-2">
+          {STATUSES.map((s) => {
+            const val = counts?.[s.key] || 0;
+            return (
+              <div
+                key={s.key}
+                className="flex items-center justify-between text-sm"
+              >
+                <span className="text-slate-400">{s.label}</span>
+                <span
+                  className={`font-semibold tabular-nums ${statusNumberClass(
+                    s.key,
+                    val,
+                  )}`}
+                >
+                  {val}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function DashboardRequestsCard({ variant = "all" }) {
   const router = useRouter();
 
-  // variant: "my" | "all"
   const { user, authHeaders, loading: authLoading } = useContext(AuthContext);
 
   const role = useMemo(() => normalizeRole(user?.role), [user?.role]);
@@ -81,17 +162,21 @@ export default function DashboardRequestsCard({ variant = "all" }) {
   const title = variant === "my" ? "My Requests" : "All Requests";
   const href = variant === "my" ? "/requests?view=my" : "/requests";
 
+  // hover state
+  const cardRef = useRef(null);
+  const [hoverOpen, setHoverOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState(null);
+
   useEffect(() => {
     if (authLoading || !allowed) return;
 
-    // must have role header
     if (!authHeaders?.["x-user-role"]) return;
-
-    // "my" requires username header
     if (variant === "my" && !authHeaders?.["x-username"]) return;
 
     let alive = true;
-    const toastId = toast.loading("Loading requests...");
+    const TOAST_ID = `requests-${variant}-loading`;
+
+    toast.loading("Loading requests...", { id: TOAST_ID });
 
     async function load() {
       try {
@@ -103,7 +188,6 @@ export default function DashboardRequestsCard({ variant = "all" }) {
           headers: { ...authHeaders },
         });
 
-        // ✅ FIX: backend returns { data, meta }
         const payload = res?.data;
         const list = Array.isArray(payload)
           ? payload
@@ -124,10 +208,10 @@ export default function DashboardRequestsCard({ variant = "all" }) {
         }
         setCounts(next);
 
-        toast.success("Requests loaded", { id: toastId });
+        toast.success("Requests loaded", { id: TOAST_ID });
       } catch (e) {
         toast.error(e?.response?.data?.error || "Failed to load requests", {
-          id: toastId,
+          id: TOAST_ID,
         });
       }
     }
@@ -136,19 +220,52 @@ export default function DashboardRequestsCard({ variant = "all" }) {
 
     return () => {
       alive = false;
-      toast.dismiss(toastId);
+      toast.dismiss(TOAST_ID);
     };
   }, [authLoading, allowed, authHeaders, variant]);
+
+  // update rect while open (scroll/resize)
+  useEffect(() => {
+    if (!hoverOpen) return;
+
+    const update = () => {
+      const el = cardRef.current;
+      if (!el) return;
+      setAnchorRect(el.getBoundingClientRect());
+    };
+
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [hoverOpen]);
+
+  const openHover = () => {
+    const el = cardRef.current;
+    if (!el) return;
+    setAnchorRect(el.getBoundingClientRect());
+    setHoverOpen(true);
+  };
+  const closeHover = () => setHoverOpen(false);
 
   if (!allowed) return null;
 
   return (
     <div
-      className="relative z-10 overflow-visible group w-full max-w-sm cursor-pointer"
+      ref={cardRef}
+      className="relative z-10 w-full max-w-sm cursor-pointer"
       onClick={() => router.push(href)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && router.push(href)}
+      onMouseEnter={openHover}
+      onMouseLeave={closeHover}
+      onFocus={openHover}
+      onBlur={closeHover}
     >
       {/* MAIN CARD */}
       <div className="rounded-xl border border-emerald-500/40 bg-slate-900/60 p-3 text-center transition hover:border-emerald-400">
@@ -156,35 +273,17 @@ export default function DashboardRequestsCard({ variant = "all" }) {
         <div className="mt-1 text-lg font-bold text-slate-50">
           Total: {total}
         </div>
+        
       </div>
 
-      {/* HOVER PANEL */}
-      <div className="pointer-events-none absolute left-0 right-0 top-full z-20 mt-3 opacity-0 translate-y-1 scale-95 transition-all duration-200 group-hover:opacity-100 group-hover:translate-y-0 group-hover:scale-100">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/95 p-4 shadow-xl">
-          <div className="space-y-2">
-            {STATUSES.map((s) => {
-              const val = counts[s.key] || 0;
-              return (
-                <div
-                  key={s.key}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <span className="text-slate-400">{s.label}</span>
-                  <span
-                    className={`font-semibold tabular-nums ${statusNumberClass(
-                      s.key,
-                      val,
-                    )}`}
-                    title={val > 0 ? "Has items" : "No items"}
-                  >
-                    {val}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      {/* PORTAL HOVER */}
+      <HoverPanel
+        open={hoverOpen}
+        anchorRect={anchorRect}
+        title={title}
+        total={total}
+        counts={counts}
+      />
     </div>
   );
 }
