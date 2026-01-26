@@ -133,13 +133,13 @@ export default function LayoutShell({ children }) {
       ];
     }
 
-    // RP (ordering role after SENT_TO_PO)
+    // RP (ordering role after SENT_TO_RP)
     if (isRP) {
       return [
         { href: "/dashboard", label: "Dashboard" },
         { href: "/projects", label: "Projects" },
         { href: "/contracts", label: "Contracts" },
-        { href: "/requests?status=SENT_TO_PO", label: "Ready to Order" },
+        { href: "/requests?status=SENT_TO_RP", label: "Ready to Order" },
         { href: "/orders", label: "Orders" },
         { href: "/requests", label: "All Requests" },
         { href: "/notifications", label: "Notifications" },

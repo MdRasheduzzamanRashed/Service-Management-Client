@@ -21,7 +21,7 @@ const STATUSES = [
   { key: "BIDDING", label: "Bidding" },
   { key: "BID_EVALUATION", label: "Bid Evaluation" },
   { key: "RECOMMENDED", label: "Recommended" },
-  { key: "SENT_TO_PO", label: "Sent to PO" },
+  { key: "SENT_TO_RP", label: "Sent to PO" },
   { key: "ORDERED", label: "Ordered" },
   { key: "REJECTED", label: "Rejected" },
   { key: "EXPIRED", label: "Expired" },
@@ -44,7 +44,7 @@ function statusNumberClass(statusKey, value) {
       return "text-amber-300";
     case "RECOMMENDED":
       return "text-emerald-300";
-    case "SENT_TO_PO":
+    case "SENT_TO_RP":
       return "text-indigo-300";
     case "ORDERED":
       return "text-green-300";
@@ -130,8 +130,6 @@ function HoverPanel({ open, anchorRect, title, total, counts }) {
             );
           })}
         </div>
-
-        
       </div>
     </div>,
     document.body,
@@ -273,7 +271,6 @@ export default function DashboardRequestsCard({ variant = "all" }) {
         <div className="mt-1 text-lg font-bold text-slate-50">
           Total: {total}
         </div>
-        
       </div>
 
       {/* PORTAL HOVER */}

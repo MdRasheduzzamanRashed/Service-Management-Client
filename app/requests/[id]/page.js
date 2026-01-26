@@ -76,7 +76,7 @@ function StatusBadge({ status }) {
               ? "bg-amber-950/40 border-amber-800/40 text-amber-200"
               : s === "RECOMMENDED"
                 ? "bg-teal-950/40 border-teal-800/40 text-teal-200"
-                : s === "SENT_TO_PO"
+                : s === "SENT_TO_RP"
                   ? "bg-indigo-950/40 border-indigo-800/40 text-indigo-200"
                   : s === "ORDERED"
                     ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-200"
@@ -136,8 +136,8 @@ export default function RequestDetailPage() {
   );
 
   const isPM = role === "PROJECT_MANAGER";
-  const isPO = role === "PROCUREMENT_OFFICER"; // ✅ reviewer + evaluator
-  const isRP = role === "RESOURCE_PLANNER"; // ✅ ordering
+  const isPO = role === "PROCUREMENT_OFFICER"; 
+  const isRP = role === "RESOURCE_PLANNER";
   const isAdmin = role === "SYSTEM_ADMIN";
 
   const [req, setReq] = useState(null);
@@ -178,7 +178,7 @@ export default function RequestDetailPage() {
   );
 
   const isExpired = status === "EXPIRED";
-
+  const isRejected = status === "REJECTED";
   const isOwner = useMemo(() => {
     if (!isPM) return false;
     return normalizeUsername(req?.createdBy) === username;
@@ -193,19 +193,20 @@ export default function RequestDetailPage() {
   const canApprove = (isPO || isAdmin) && status === "IN_REVIEW";
   const canReject = (isPO || isAdmin) && status === "IN_REVIEW";
 
-  // ✅ SWAPPED: PO evaluates at BID_EVALUATION
+  // ✅ SWAPPED: RP evaluates at BID_EVALUATION
   const canEvaluate = (isRP || isAdmin) && status === "BID_EVALUATION";
 
-  // ✅ PM sends to PO at RECOMMENDED
+  // ✅ PM sends to RP at RECOMMENDED
   const canSendToRP = (isPM || isAdmin) && status === "RECOMMENDED";
 
-  // ✅ RP orders at SENT_TO_PO
-  const canOrder = (isRP || isAdmin) && status === "SENT_TO_PO";
+  // ✅ RP orders at SENT_TO_RP
+  const canOrder = (isRP || isAdmin) && status === "SENT_TO_RP";
 
   // ✅ EXPIRED: disable everything automatically (except reactivate for owner PM)
   const actionsDisabled = actionLoading || isExpired;
   const canReactivate = isOwner && isExpired;
-
+  const canReSubmit = isOwner && isRejected;
+  
   const runAction = useCallback(
     async ({ url, body, okMsg }) => {
       if (!id || !headersReady) return;
@@ -336,14 +337,14 @@ export default function RequestDetailPage() {
     if (req.sentToPoAt) {
       steps.push({
         title: "Sent to ordering stage",
-        badge: "SENT_TO_PO",
+        badge: "SENT_TO_RP",
         time: fmtDateTime(req.sentToPoAt),
         note: req.sentToPoBy ? `Sent by ${req.sentToPoBy}` : "",
       });
-    } else if (st === "SENT_TO_PO") {
+    } else if (st === "SENT_TO_RP") {
       steps.push({
         title: "Sent to ordering stage",
-        badge: "SENT_TO_PO",
+        badge: "SENT_TO_RP",
         time: "—",
         note: "",
       });
@@ -567,7 +568,7 @@ export default function RequestDetailPage() {
           )}
 
           {/* ✅ PM sends to PO at RECOMMENDED */}
-          {canSendToPO && (
+          {canSendToRP && (
             <button
               type="button"
               disabled={actionsDisabled}
@@ -583,7 +584,7 @@ export default function RequestDetailPage() {
             </button>
           )}
 
-          {/* ✅ RP places order at SENT_TO_PO */}
+          {/* ✅ RP places order at SENT_TO_RP */}
           {canOrder && (
             <button
               type="button"

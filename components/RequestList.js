@@ -99,7 +99,7 @@ function StatusBadge({ status }) {
               ? "bg-amber-950 border-amber-700 text-amber-300"
               : s === "RECOMMENDED"
                 ? "bg-teal-950 border-teal-700 text-teal-300"
-                : s === "SENT_TO_PO"
+                : s === "SENT_TO_RP"
                   ? "bg-indigo-950 border-indigo-700 text-indigo-300"
                   : s === "ORDERED"
                     ? "bg-green-950 border-green-700 text-green-300"
@@ -270,10 +270,10 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
   );
 
   // ✅ swapped roles rules
-  const canSendToPO = role === "PROJECT_MANAGER";
+  const canSendToRP = role === "PROJECT_MANAGER";
   const canOrder = role === "RESOURCE_PLANNER"; // ✅ ordering role
   const canEvaluate =
-    role === "PROCUREMENT_OFFICER" && requestStatus === "BID_EVALUATION"; // ✅ evaluator
+    role === "RESOURCE_PLANNER" && requestStatus === "BID_EVALUATION"; // ✅ evaluator
 
   const bestAuto = useMemo(() => {
     const arr = (offers || [])
@@ -282,9 +282,9 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     return arr[0] || null;
   }, [offers]);
 
-  const disabledSendToPO = requestStatus !== "RECOMMENDED";
+  const disabledSendToRP = requestStatus !== "RECOMMENDED";
   const disabledOrder =
-    requestStatus !== "SENT_TO_PO" ||
+    requestStatus !== "SENT_TO_RP" ||
     (!recommendedOfferId && !offerIdAny(bestAuto));
 
   const offersAbortRef = useRef(null);
@@ -366,11 +366,11 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
     };
   }, [reqDoc, loadOffers, loadRequest]);
 
-  async function sendToPO() {
+  async function sendToRP() {
     try {
       setErr("");
       const res = await apiPost(
-        `/requests/${encodeURIComponent(requestId)}/send-to-po`,
+        `/requests/${encodeURIComponent(requestId)}/send-to-rp`,
         {},
         { headers: { ...authHeaders }, params: { _t: Date.now() } },
       );
@@ -458,14 +458,14 @@ function OffersModal({ reqDoc, authHeaders, role, onClose, onChanged }) {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            {canSendToPO && (
+            {canSendToRP && (
               <button
-                onClick={sendToPO}
-                disabled={disabledSendToPO}
+                onClick={sendToRP}
+                disabled={disabledSendToRP}
                 className="w-full sm:w-auto px-3 py-2 rounded-xl bg-indigo-500 text-black text-xs font-semibold disabled:opacity-50 active:scale-[0.99]"
                 type="button"
               >
-                Send to PO
+                Send to RP
               </button>
             )}
 
@@ -876,7 +876,7 @@ export default function RequestList({ view = "all" }) {
             <option value="BIDDING">BIDDING</option>
             <option value="BID_EVALUATION">BID_EVALUATION</option>
             <option value="RECOMMENDED">RECOMMENDED</option>
-            <option value="SENT_TO_PO">SENT_TO_PO</option>
+            <option value="SENT_TO_RP">SENT_TO_RP</option>
             <option value="ORDERED">ORDERED</option>
             <option value="REJECTED">REJECTED</option>
             <option value="EXPIRED">EXPIRED</option>
@@ -1001,8 +1001,8 @@ export default function RequestList({ view = "all" }) {
                     View
                   </Link>
 
-                  {/* ✅ Evaluate is PO now */}
-                  {role === "PROCUREMENT_OFFICER" &&
+                  {/* ✅ Evaluate is RP now */}
+                  {role === "RESOURCE_PLANNER" &&
                     status === "BID_EVALUATION" && (
                       <Link
                         href={`/requests/${id}/evaluation`}

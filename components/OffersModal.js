@@ -65,7 +65,7 @@ function statusBadgeClass(status) {
     return `${base} border-sky-500/40 text-sky-300 bg-sky-500/10`;
   if (s === "RECOMMENDED")
     return `${base} border-emerald-500/40 text-emerald-300 bg-emerald-500/10`;
-  if (s === "SENT_TO_PO")
+  if (s === "SENT_TO_RP")
     return `${base} border-indigo-500/40 text-indigo-300 bg-indigo-500/10`;
   if (s === "ORDERED")
     return `${base} border-green-500/40 text-green-300 bg-green-500/10`;
@@ -94,8 +94,8 @@ export default function OffersModal({ reqDoc, onClose, onUpdated }) {
 
   // ✅ SWAP FIX:
   // - PO recommends offer (BID_EVALUATION -> RECOMMENDED)
-  // - RP orders (SENT_TO_PO -> ORDERED)
-  const canRecommend = role === "PROCUREMENT_OFFICER";
+  // - RP orders (SENT_TO_RP -> ORDERED)
+  const canRecommend = role === "RESOURCE_PLANNER";
   const canOrder = role === "RESOURCE_PLANNER";
 
   const requestStatus = useMemo(() => roleUpper(req?.status), [req?.status]);
@@ -173,7 +173,7 @@ export default function OffersModal({ reqDoc, onClose, onUpdated }) {
 
   const showOrderButton =
     canOrder &&
-    requestStatus === "SENT_TO_PO" &&
+    requestStatus === "SENT_TO_RP" &&
     !!(recommendedOfferId || selectedOfferId);
 
   const handleRecommend = useCallback(async () => {
@@ -187,7 +187,7 @@ export default function OffersModal({ reqDoc, onClose, onUpdated }) {
     try {
       // ✅ backend supports /po-recommend-offer (and legacy /rp-recommend-offer if you add it)
       const res = await apiPost(
-        `/requests/${encodeURIComponent(requestId)}/po-recommend-offer`,
+        `/requests/${encodeURIComponent(requestId)}/rp-recommend-offer`,
         { offerId: selectedOfferId },
         { headers: authHeaders },
       );
@@ -553,7 +553,7 @@ export default function OffersModal({ reqDoc, onClose, onUpdated }) {
                 You can{" "}
                 <span className="text-slate-200">
                   {canRecommend
-                    ? "recommend (PO)"
+                    ? "recommend (RP)"
                     : canOrder
                       ? "order (RP)"
                       : "view"}

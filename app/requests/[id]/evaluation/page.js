@@ -115,9 +115,9 @@ function extractOffers(payload) {
 }
 
 /* =========================================================
-   ✅ PO Evaluation Page
+   ✅ RP Evaluation Page
 ========================================================= */
-export default function POEvaluationPage() {
+export default function RPEvaluationPage() {
   const router = useRouter();
   const params = useParams();
   const requestId = String(params?.id || "").trim();
@@ -142,7 +142,7 @@ export default function POEvaluationPage() {
   // { offerId: {price, delivery, quality, notes} }
   const [scores, setScores] = useState({});
 
-  const canUse = role === "PROCUREMENT_OFFICER" || role === "SYSTEM_ADMIN";
+  const canUse = role === "RESOURCE_PLANNER" || role === "SYSTEM_ADMIN";
   const status = useMemo(() => roleUpper(reqDoc?.status), [reqDoc?.status]);
 
   const headersReady = !!authHeaders?.["x-user-role"];
@@ -184,7 +184,7 @@ export default function POEvaluationPage() {
         apiGet(`/offers/by-request/${encodeURIComponent(requestId)}`, {
           headers: authHeaders,
         }),
-        apiGet(`/po-evaluations/po/${encodeURIComponent(requestId)}`, {
+        apiGet(`/rp-evaluations/rp/${encodeURIComponent(requestId)}`, {
           headers: authHeaders,
         }),
       ]);
@@ -280,7 +280,7 @@ export default function POEvaluationPage() {
         }),
       };
 
-      const res = await apiPost(`/po-evaluations/po/${requestId}`, payload, {
+      const res = await apiPost(`/rp-evaluations/rp/${requestId}`, payload, {
         headers: authHeaders,
       });
 
@@ -344,7 +344,7 @@ export default function POEvaluationPage() {
     return (
       <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/30">
         <p className="text-sm text-red-300">
-          Only PROCUREMENT_OFFICER or SYSTEM_ADMIN can access this page.
+          Only RP or SYSTEM_ADMIN can access this page.
         </p>
       </div>
     );
@@ -372,7 +372,7 @@ export default function POEvaluationPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h1 className="text-base font-semibold text-slate-100 truncate">
-              PO Evaluation
+              RP Evaluation
             </h1>
             <p className="mt-1 text-xs text-slate-400 break-all">
               Request: <span className="text-slate-200">{requestId}</span>

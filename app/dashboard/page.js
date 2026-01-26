@@ -143,14 +143,14 @@ function DashboardContent() {
               <MyOrdersPage />
             </div>
 
-            {/* Requests ready for ordering (SENT_TO_PO) */}
+            {/* Requests ready for ordering (SENT_TO_RP) */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="text-sm font-semibold text-slate-100">
                   Requests Ready for Ordering
                 </h2>
                 <a
-                  href="/requests?status=SENT_TO_PO"
+                  href="/requests?status=SENT_TO_RP"
                   className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
                 >
                   Open

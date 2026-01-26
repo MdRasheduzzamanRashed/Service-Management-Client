@@ -84,10 +84,10 @@ function TableSkeleton() {
 /* =========================================================
    ✅ Inbox for ORDERING role after swap
    Swap says:
-   - SENT_TO_PO -> ORDERED is done by RESOURCE_PLANNER (RP)
+   - SENT_TO_RP -> ORDERED is done by RESOURCE_PLANNER (RP)
    Therefore:
    - This page should be RP inbox (not PO).
-   - It lists requests with status SENT_TO_PO
+   - It lists requests with status SENT_TO_RP
    - It calls POST /requests/:id/order
 
    Note: your GET /requests returns { data, meta } in your routes.
@@ -129,7 +129,7 @@ export default function OrderingInboxPage() {
 
       const res = await apiGet("/requests", {
         headers: authHeaders,
-        params: { status: "SENT_TO_PO", _t: Date.now() },
+        params: { status: "SENT_TO_RP", _t: Date.now() },
       });
 
       setRaw(normalizeList(res?.data));
@@ -238,7 +238,7 @@ export default function OrderingInboxPage() {
               Ordering Inbox
             </h1>
             <p className="text-xs text-slate-400">
-              Requests waiting for ordering (status: SENT_TO_PO).
+              Requests waiting for ordering (status: SENT_TO_RP).
             </p>
           </div>
 
