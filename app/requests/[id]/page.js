@@ -194,10 +194,10 @@ export default function RequestDetailPage() {
   const canReject = (isPO || isAdmin) && status === "IN_REVIEW";
 
   // ✅ SWAPPED: PO evaluates at BID_EVALUATION
-  const canEvaluate = (isPO || isAdmin) && status === "BID_EVALUATION";
+  const canEvaluate = (isRP || isAdmin) && status === "BID_EVALUATION";
 
   // ✅ PM sends to PO at RECOMMENDED
-  const canSendToPO = (isPM || isAdmin) && status === "RECOMMENDED";
+  const canSendToRP = (isPM || isAdmin) && status === "RECOMMENDED";
 
   // ✅ RP orders at SENT_TO_PO
   const canOrder = (isRP || isAdmin) && status === "SENT_TO_PO";

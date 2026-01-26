@@ -39,6 +39,11 @@ function fmtMoney(v, currency = "EUR") {
   return `${num.toLocaleString()} ${currency}`;
 }
 
+function safeNum(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /* =========================
    Offer Adapter
 ========================= */
@@ -92,6 +97,23 @@ function getSupplierScorecard(o) {
   return { techTxt, commTxt, riskTxt };
 }
 
+/* =========================
+   API response adapters
+========================= */
+function extractOffers(payload) {
+  // apiGet returns axios response => { data: ... }
+  const root = payload?.data;
+
+  if (Array.isArray(root)) return root;
+  if (Array.isArray(root?.data)) return root.data;
+  if (Array.isArray(root?.offers)) return root.offers;
+
+  // your offers endpoint sometimes returns { data: { data:[...] } }
+  if (Array.isArray(root?.data?.data)) return root.data.data;
+
+  return [];
+}
+
 /* =========================================================
    ✅ PO Evaluation Page
 ========================================================= */
@@ -131,17 +153,17 @@ export default function POEvaluationPage() {
     const delivery = clamp0to10(s.delivery);
     const quality = clamp0to10(s.quality);
 
-    const sum = Number(wPrice) + Number(wDelivery) + Number(wQuality) || 1;
-    const wp = Number(wPrice) / sum;
-    const wd = Number(wDelivery) / sum;
-    const wq = Number(wQuality) / sum;
+    const sum = safeNum(wPrice) + safeNum(wDelivery) + safeNum(wQuality) || 1;
+    const wp = safeNum(wPrice) / sum;
+    const wd = safeNum(wDelivery) / sum;
+    const wq = safeNum(wQuality) / sum;
 
     return price * wp + delivery * wd + quality * wq;
   }
 
   const ranked = useMemo(() => {
     const rows = (offers || []).map((o) => {
-      const oid = idStr(o?._id);
+      const oid = idStr(o?._id) || idStr(o?.id);
       return { offer: o, offerId: oid, total: computeTotalScore(oid) };
     });
     rows.sort((a, b) => b.total - a.total);
@@ -162,18 +184,13 @@ export default function POEvaluationPage() {
         apiGet(`/offers/by-request/${encodeURIComponent(requestId)}`, {
           headers: authHeaders,
         }),
-
-        // ✅ FIX #1: use explicit /po route (matches your server)
         apiGet(`/po-evaluations/po/${encodeURIComponent(requestId)}`, {
           headers: authHeaders,
         }),
       ]);
 
       const r = reqRes?.data || null;
-
-      const list = Array.isArray(offersRes?.data?.data)
-        ? offersRes.data.data
-        : [];
+      const list = extractOffers(offersRes);
 
       const ev = evalRes?.data || null;
 
@@ -181,12 +198,12 @@ export default function POEvaluationPage() {
       setOffers(list);
       setSavedEval(ev);
 
+      // hydrate weights / comment / recommended / scores
       if (ev?.weights) {
         setWPrice(Number(ev.weights.price ?? 0.6));
         setWDelivery(Number(ev.weights.delivery ?? 0.25));
         setWQuality(Number(ev.weights.quality ?? 0.15));
       }
-
       if (typeof ev?.comment === "string") setComment(ev.comment);
       if (ev?.recommendedOfferId)
         setRecommendedOfferId(String(ev.recommendedOfferId));
@@ -207,7 +224,8 @@ export default function POEvaluationPage() {
       } else {
         const next = {};
         for (const o of list) {
-          const oid = idStr(o?._id);
+          const oid = idStr(o?._id) || idStr(o?.id);
+          if (!oid) continue;
           next[oid] = { price: 0, delivery: 0, quality: 0, notes: "" };
         }
         setScores(next);
@@ -225,6 +243,16 @@ export default function POEvaluationPage() {
     loadAll();
   }, [loadAll]);
 
+  const setScoreField = (offerId, field, value) => {
+    setScores((prev) => ({
+      ...prev,
+      [offerId]: {
+        ...(prev[offerId] || { price: 0, delivery: 0, quality: 0, notes: "" }),
+        [field]: value,
+      },
+    }));
+  };
+
   async function saveEvaluation() {
     const t = toast.loading("Saving evaluation...");
     try {
@@ -233,7 +261,7 @@ export default function POEvaluationPage() {
         comment,
         recommendedOfferId: recommendedOfferId || "",
         offers: (offers || []).map((o) => {
-          const oid = idStr(o?._id);
+          const oid = idStr(o?._id) || idStr(o?.id);
           const s = scores[oid] || {};
           return {
             offerId: oid,
@@ -252,12 +280,12 @@ export default function POEvaluationPage() {
         }),
       };
 
-      // ✅ FIX #1: post to /po route too
       const res = await apiPost(`/po-evaluations/po/${requestId}`, payload, {
         headers: authHeaders,
       });
 
-      setSavedEval(res?.data?.data || null);
+      // some servers return {data:{...}}, others return direct doc
+      setSavedEval(res?.data?.data || res?.data || null);
       toast.success("Evaluation saved", { id: t });
     } catch (e) {
       toast.error(e?.response?.data?.error || e?.message || "Save failed", {
@@ -281,7 +309,6 @@ export default function POEvaluationPage() {
 
     const t = toast.loading("Recommending offer...");
     try {
-      // ✅ FIX #2: match your backend route name (currently rp-recommend-offer)
       await apiPost(
         `/requests/${requestId}/rp-recommend-offer`,
         { offerId: recommendedOfferId },
@@ -302,6 +329,9 @@ export default function POEvaluationPage() {
     }
   }
 
+  /* =========================
+     Guards
+  ========================= */
   if (!headersReady) {
     return (
       <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/30">
@@ -314,7 +344,7 @@ export default function POEvaluationPage() {
     return (
       <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/30">
         <p className="text-sm text-red-300">
-          Only PROCUREMENT_OFFICER can access this page.
+          Only PROCUREMENT_OFFICER or SYSTEM_ADMIN can access this page.
         </p>
       </div>
     );
@@ -326,10 +356,326 @@ export default function POEvaluationPage() {
     );
   }
 
+  /* =========================
+     UI
+  ========================= */
+  const reqTitle =
+    reqDoc?.title ||
+    reqDoc?.projectName ||
+    reqDoc?.projectId ||
+    `Request ${requestId}`;
+
   return (
     <div className="space-y-4">
-      {/* ... YOUR UI BELOW UNCHANGED ... */}
-      {/* keep the rest exactly as you wrote */}
+      {/* Header */}
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-base font-semibold text-slate-100 truncate">
+              PO Evaluation
+            </h1>
+            <p className="mt-1 text-xs text-slate-400 break-all">
+              Request: <span className="text-slate-200">{requestId}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              Title: <span className="text-slate-200">{reqTitle}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              Status: <span className="text-slate-200">{status || "—"}</span>
+              {savedEval ? (
+                <span className="ml-2 text-[11px] text-emerald-300">
+                  (Saved)
+                </span>
+              ) : (
+                <span className="ml-2 text-[11px] text-slate-500">
+                  (Not saved yet)
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => router.push(`/requests/${requestId}`)}
+              className="w-full sm:w-auto text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+            >
+              ← Back
+            </button>
+
+            <button
+              type="button"
+              onClick={saveEvaluation}
+              className="w-full sm:w-auto text-xs px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+            >
+              Save
+            </button>
+
+            <button
+              type="button"
+              onClick={recommendNow}
+              disabled={status !== "BID_EVALUATION"}
+              className="w-full sm:w-auto text-xs px-3 py-2 rounded-xl bg-emerald-500 text-black font-semibold hover:bg-emerald-400 disabled:opacity-60"
+              title={
+                status !== "BID_EVALUATION"
+                  ? "Only BID_EVALUATION can be recommended"
+                  : "Recommend selected offer"
+              }
+            >
+              Recommend
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Weights */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <WeightCard label="Price Weight" value={wPrice} onChange={setWPrice} />
+        <WeightCard
+          label="Delivery Weight"
+          value={wDelivery}
+          onChange={setWDelivery}
+        />
+        <WeightCard
+          label="Quality Weight"
+          value={wQuality}
+          onChange={setWQuality}
+        />
+      </div>
+
+      {/* Comment + Recommended */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <h3 className="text-sm font-semibold text-slate-100">Comment</h3>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Add your evaluation notes (optional).
+          </p>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={5}
+            className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400/60"
+            placeholder="Write your notes…"
+          />
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <h3 className="text-sm font-semibold text-slate-100">
+            Recommended Offer
+          </h3>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Select one offer to recommend.
+          </p>
+
+          <select
+            value={recommendedOfferId}
+            onChange={(e) => setRecommendedOfferId(e.target.value)}
+            className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/60"
+          >
+            <option value="">-- Select --</option>
+            {ranked.map((r) => {
+              const o = r.offer;
+              const oid = r.offerId;
+              const name = getProviderName(o);
+              const price = getPrice(o);
+              const currency = getCurrency(o);
+              return (
+                <option key={oid} value={oid}>
+                  {name} — {price != null ? fmtMoney(price, currency) : "—"} —{" "}
+                  Total {r.total.toFixed(2)}
+                </option>
+              );
+            })}
+          </select>
+
+          <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/30 p-3">
+            <p className="text-[11px] text-slate-500">Tip</p>
+            <p className="text-xs text-slate-300">
+              You can also choose by clicking “Recommend” on a card below.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Offers */}
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-100">Offers</h3>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Score each offer (0–10). Total score is computed from weights.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadAll}
+            className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {ranked.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/30 p-4 text-sm text-slate-300">
+            No offers found for this request.
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {ranked.map(({ offer: o, offerId, total }, idx) => {
+              const s = scores[offerId] || {
+                price: 0,
+                delivery: 0,
+                quality: 0,
+                notes: "",
+              };
+
+              const providerName = getProviderName(o);
+              const providerUsername = getProviderUsername(o);
+              const currency = getCurrency(o);
+              const price = getPrice(o);
+              const sc = getSupplierScorecard(o);
+
+              const isRec = recommendedOfferId === offerId;
+
+              return (
+                <div
+                  key={offerId}
+                  className={`rounded-2xl border p-4 bg-slate-950/35 ${
+                    isRec
+                      ? "border-emerald-400/60"
+                      : "border-slate-800 hover:border-slate-700"
+                  } transition`}
+                >
+                  {/* Card header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs rounded-lg border border-slate-700 bg-slate-950/30 px-2 py-1 text-slate-200">
+                          Rank #{idx + 1}
+                        </span>
+                        {isRec ? (
+                          <span className="text-xs rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-emerald-200">
+                            Recommended
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-2 text-sm font-semibold text-slate-100 truncate">
+                        {providerName}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-500 break-all">
+                        {providerUsername ? `@${providerUsername}` : "—"}
+                      </p>
+
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-400">
+                        <span className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                          {sc.techTxt}
+                        </span>
+                        <span className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                          {sc.commTxt}
+                        </span>
+                        <span className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                          {sc.riskTxt}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <div className="text-[11px] text-slate-500">Price</div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        {price != null ? fmtMoney(price, currency) : "—"}
+                      </div>
+
+                      <div className="mt-2 text-[11px] text-slate-500">
+                        Total Score
+                      </div>
+                      <div className="text-base font-bold text-emerald-200">
+                        {total.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Score inputs */}
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <ScoreInput
+                      label="Price (0–10)"
+                      value={s.price}
+                      onChange={(v) => setScoreField(offerId, "price", v)}
+                    />
+                    <ScoreInput
+                      label="Delivery (0–10)"
+                      value={s.delivery}
+                      onChange={(v) => setScoreField(offerId, "delivery", v)}
+                    />
+                    <ScoreInput
+                      label="Quality (0–10)"
+                      value={s.quality}
+                      onChange={(v) => setScoreField(offerId, "quality", v)}
+                    />
+                  </div>
+
+                  {/* Notes */}
+                  <div className="mt-3">
+                    <label className="text-[11px] text-slate-400">Notes</label>
+                    <textarea
+                      value={s.notes || ""}
+                      onChange={(e) =>
+                        setScoreField(offerId, "notes", e.target.value)
+                      }
+                      rows={3}
+                      className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 outline-none focus:border-emerald-400/60"
+                      placeholder="Optional notes about this provider…"
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="text-[11px] text-slate-500">
+                      Delivery days:{" "}
+                      <span className="text-slate-200">
+                        {o?.deliveryDays != null ? String(o.deliveryDays) : "—"}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setRecommendedOfferId(offerId)}
+                      className={`text-xs px-3 py-2 rounded-xl border transition active:scale-[0.99] ${
+                        isRec
+                          ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-700 hover:bg-slate-800 text-slate-200"
+                      }`}
+                      title="Set as recommended"
+                    >
+                      {isRec ? "Selected" : "Recommend"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom actions */}
+      <div className="flex flex-col sm:flex-row gap-2 justify-end">
+        <button
+          type="button"
+          onClick={saveEvaluation}
+          className="w-full sm:w-auto text-xs px-4 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+        >
+          Save Evaluation
+        </button>
+        <button
+          type="button"
+          onClick={recommendNow}
+          disabled={status !== "BID_EVALUATION"}
+          className="w-full sm:w-auto text-xs px-4 py-2 rounded-xl bg-emerald-500 text-black font-semibold hover:bg-emerald-400 disabled:opacity-60"
+        >
+          Recommend Now
+        </button>
+      </div>
     </div>
   );
 }
