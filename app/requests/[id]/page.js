@@ -319,7 +319,7 @@ export default function RequestDetailPage() {
 
     if (req.recommendedAt) {
       steps.push({
-        title: "Offer recommended by Procurement Officer",
+        title: "Offer recommended by Resource Planner",
         badge: "RECOMMENDED",
         time: fmtDateTime(req.recommendedAt),
         note: [
@@ -331,7 +331,7 @@ export default function RequestDetailPage() {
       });
     } else if (st === "RECOMMENDED") {
       steps.push({
-        title: "Offer recommended by Procurement Officer",
+        title: "Offer recommended by Resource Planner",
         badge: "RECOMMENDED",
         time: "—",
         note: req.recommendedOfferId
