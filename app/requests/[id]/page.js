@@ -57,6 +57,15 @@ function getErrMsg(e) {
     "Request failed"
   );
 }
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function joinComma(v) {
+  if (!v) return "";
+  if (Array.isArray(v)) return v.filter(Boolean).join(", ");
+  return String(v);
+}
 
 /* =========================
    UI
@@ -136,7 +145,7 @@ export default function RequestDetailPage() {
   );
 
   const isPM = role === "PROJECT_MANAGER";
-  const isPO = role === "PROCUREMENT_OFFICER"; 
+  const isPO = role === "PROCUREMENT_OFFICER";
   const isRP = role === "RESOURCE_PLANNER";
   const isAdmin = role === "SYSTEM_ADMIN";
 
@@ -189,7 +198,7 @@ export default function RequestDetailPage() {
   const canSubmitForReview = isOwner && status === "DRAFT";
   const canSubmitForBidding = isOwner && status === "APPROVED_FOR_SUBMISSION";
 
-  // ✅ SWAPPED: PO does approve/reject during IN_REVIEW
+  // ✅ SWAPPED: PO approves/rejects during IN_REVIEW
   const canApprove = (isPO || isAdmin) && status === "IN_REVIEW";
   const canReject = (isPO || isAdmin) && status === "IN_REVIEW";
 
@@ -202,11 +211,10 @@ export default function RequestDetailPage() {
   // ✅ RP orders at SENT_TO_RP
   const canOrder = (isRP || isAdmin) && status === "SENT_TO_RP";
 
-  // ✅ EXPIRED: disable everything automatically (except reactivate for owner PM)
   const actionsDisabled = actionLoading || isExpired;
   const canReactivate = isOwner && isExpired;
   const canReSubmit = isOwner && isRejected;
-  
+
   const runAction = useCallback(
     async ({ url, body, okMsg }) => {
       if (!id || !headersReady) return;
@@ -222,7 +230,6 @@ export default function RequestDetailPage() {
           params: { _t: Date.now() },
         });
 
-        // some endpoints may return updated request; use it if present
         const updated = res?.data?.request || res?.data || null;
         if (updated && updated?._id) setReq(updated);
         else await load();
@@ -264,7 +271,6 @@ export default function RequestDetailPage() {
       });
     }
 
-    // stored as rpApprovedAt in DB but shown as PO due to swapped workflow
     if (req.rpApprovedAt) {
       steps.push({
         title: "Approved by Procurement Officer",
@@ -511,7 +517,6 @@ export default function RequestDetailPage() {
               disabled={actionsDisabled}
               onClick={() =>
                 runAction({
-                  // ✅ keep backend route name
                   url: `/requests/${id}/rp-approve`,
                   okMsg: "Approved for submission.",
                 })
@@ -529,7 +534,6 @@ export default function RequestDetailPage() {
               onClick={() => {
                 const reason = prompt("Reject reason?", "Not suitable") || "";
                 runAction({
-                  // ✅ keep backend route name
                   url: `/requests/${id}/rp-reject`,
                   body: { reason },
                   okMsg: "Rejected.",
@@ -557,34 +561,32 @@ export default function RequestDetailPage() {
             </button>
           )}
 
-          {/* ✅ Evaluate link (PO + Admin) */}
+          {/* ✅ evaluate link matches canEvaluate = RP/Admin */}
           {canEvaluate && (
             <Link
               href={`/requests/${encodeURIComponent(String(id))}/evaluation`}
               className="px-3 py-1.5 text-xs rounded-full bg-amber-400 text-black hover:bg-amber-300"
             >
-              PO: Evaluate Offers
+              RP: Evaluate Offers
             </Link>
           )}
 
-          {/* ✅ PM sends to PO at RECOMMENDED */}
           {canSendToRP && (
             <button
               type="button"
               disabled={actionsDisabled}
               onClick={() =>
                 runAction({
-                  url: `/requests/${id}/send-to-po`,
+                  url: `/requests/${id}/send-to-rp`,
                   okMsg: "Sent to ordering stage.",
                 })
               }
               className="px-3 py-1.5 text-xs rounded-full bg-indigo-400 text-black hover:bg-indigo-300 disabled:opacity-60"
             >
-              PM: Send to PO
+              PM: Send to RP
             </button>
           )}
 
-          {/* ✅ RP places order at SENT_TO_RP */}
           {canOrder && (
             <button
               type="button"
@@ -622,6 +624,22 @@ export default function RequestDetailPage() {
               className="px-3 py-1.5 text-xs rounded-full bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-60"
             >
               PM: Reactivate
+            </button>
+          )}
+
+          {canReSubmit && (
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={() =>
+                runAction({
+                  url: `/requests/${id}/submit-for-review`,
+                  okMsg: "Re-submitted for review.",
+                })
+              }
+              className="px-3 py-1.5 text-xs rounded-full bg-blue-400 text-black hover:bg-blue-300 disabled:opacity-60"
+            >
+              PM: Re-submit
             </button>
           )}
         </div>
@@ -662,64 +680,169 @@ export default function RequestDetailPage() {
         <Info label="Recommended Offer ID" value={recommendedOfferId} />
       </Section>
 
-      {/* ROLES */}
+      {/* ROLES (UPDATED FOR LEVELS) */}
       <Section title="Requested Roles">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border border-slate-800 rounded-xl">
-            <thead className="bg-slate-950/60 text-[11px] text-slate-400">
-              <tr>
-                <th className="px-3 py-2 text-left">Role</th>
-                <th className="px-3 py-2 text-left">Domain</th>
-                <th className="px-3 py-2 text-left">Technology</th>
-                <th className="px-3 py-2 text-left">Experience</th>
-                <th className="px-3 py-2 text-left">Man Days</th>
-                <th className="px-3 py-2 text-left">Onsite Days</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(req.roles || []).map((r, i) => (
-                <tr key={i} className="border-t border-slate-800">
-                  <td className="px-3 py-2 text-slate-200">
-                    {r.roleName || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-200">
-                    {r.domain || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-200">
-                    {r.technology || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-200">
-                    {r.experienceLevel || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-200">
-                    {r.manDays ?? "—"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-200">
-                    {r.onsiteDays ?? "—"}
-                  </td>
-                </tr>
-              ))}
-              {(!req.roles || req.roles.length === 0) && (
-                <tr>
-                  <td className="px-3 py-3 text-xs text-slate-400" colSpan={6}>
-                    No roles found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {(req.roles || []).map((r, i) => {
+            const roleName = r?.roleName || "—";
+            const domain = r?.domain || "—";
+            const technology = r?.technology || "—";
+            const comps = Array.isArray(r?.requiredCompetencies)
+              ? r.requiredCompetencies
+              : [];
+
+            const levels = Array.isArray(r?.levels) ? r.levels : [];
+
+            // fallback: old shape support
+            const oldShape =
+              !levels.length &&
+              (r?.experienceLevel ||
+                r?.manDays != null ||
+                r?.onsiteDays != null ||
+                r?.workingHoursPerDay != null ||
+                r?.salaryPerHour != null);
+
+            const totalEmployees = levels
+              .map((lv) => num(lv?.employees) || 0)
+              .reduce((a, b) => a + b, 0);
+
+            return (
+              <div
+                key={i}
+                className="rounded-2xl border border-slate-800 bg-slate-950/30 p-3"
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-100">
+                      {roleName}
+                    </p>
+                    <p className="text-[12px] text-slate-400 mt-0.5">
+                      Domain: <span className="text-slate-200">{domain}</span> ·
+                      Tech: <span className="text-slate-200">{technology}</span>
+                      {levels.length ? (
+                        <>
+                          {" "}
+                          · Employees:{" "}
+                          <span className="text-slate-200">
+                            {totalEmployees}
+                          </span>
+                        </>
+                      ) : null}
+                    </p>
+
+                    {!!comps.length && (
+                      <p className="text-[12px] text-slate-400 mt-1">
+                        Competencies:{" "}
+                        <span className="text-slate-200">
+                          {comps.join(", ")}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* NEW: levels table */}
+                {levels.length ? (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-sm border border-slate-800 rounded-xl">
+                      <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Level</th>
+                          <th className="px-3 py-2 text-left">Employees</th>
+                          <th className="px-3 py-2 text-left">Expertise</th>
+                          <th className="px-3 py-2 text-left">Man Days</th>
+                          <th className="px-3 py-2 text-left">Onsite Days</th>
+                          <th className="px-3 py-2 text-left">Hours/Day</th>
+                          <th className="px-3 py-2 text-left">€/Hour</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {levels.map((lv, li) => (
+                          <tr key={li} className="border-t border-slate-800">
+                            <td className="px-3 py-2 text-slate-200">
+                              {lv?.level || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              {lv?.employees ?? "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              {joinComma(lv?.expertise) ||
+                                lv?.expertiseText ||
+                                "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              {lv?.manDays ?? "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              {lv?.onsiteDays ?? "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              {lv?.workingHoursPerDay ?? "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              {lv?.salaryPerHour ?? "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+
+                {/* fallback: old single-level fields */}
+                {oldShape ? (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-sm border border-slate-800 rounded-xl">
+                      <thead className="bg-slate-950/60 text-[11px] text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Experience</th>
+                          <th className="px-3 py-2 text-left">Man Days</th>
+                          <th className="px-3 py-2 text-left">Onsite Days</th>
+                          <th className="px-3 py-2 text-left">Hours/Day</th>
+                          <th className="px-3 py-2 text-left">€/Hour</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-t border-slate-800">
+                          <td className="px-3 py-2 text-slate-200">
+                            {r.experienceLevel || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-slate-200">
+                            {r.manDays ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-slate-200">
+                            {r.onsiteDays ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-slate-200">
+                            {r.workingHoursPerDay ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-slate-200">
+                            {r.salaryPerHour ?? "—"}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+
+          {(!req.roles || req.roles.length === 0) && (
+            <div className="text-xs text-slate-400">No roles found.</div>
+          )}
         </div>
       </Section>
 
       {/* REQUIREMENTS */}
-      <Section title="Requirements">
+      <Section title="Project Requirements">
         <Info label="Required Languages" value={languagesText} />
         <Info
-          label="Must Have"
+          label="Must Have (Project Requirement)"
           value={(req.mustHaveCriteria || []).join(", ")}
         />
         <Info
-          label="Nice To Have"
+          label="Nice To Have (Project Requirement)"
           value={(req.niceToHaveCriteria || []).join(", ")}
         />
       </Section>

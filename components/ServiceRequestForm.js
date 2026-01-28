@@ -1,3 +1,4 @@
+// components/ServiceRequestForm.jsx
 "use client";
 
 import {
@@ -36,8 +37,16 @@ function clampInt(val, min, max) {
   return Math.max(min, Math.min(max, x));
 }
 
-// Project API sometimes returns XML-shaped fields or nested arrays.
-// This normalizer makes your form stable.
+function extractArrayMaybe(x) {
+  if (Array.isArray(x)) return x;
+  if (Array.isArray(x?.data)) return x.data;
+  if (Array.isArray(x?.items)) return x.items;
+  return [];
+}
+
+/* =========================
+   Project Normalizer
+========================= */
 function normalizeProject(p) {
   if (!p) return null;
 
@@ -140,6 +149,9 @@ function suggestTypeFromProject(project) {
   return "MULTI";
 }
 
+/* =========================
+   Contracts Normalizer
+========================= */
 function extractContracts(json) {
   if (Array.isArray(json)) return json;
   if (Array.isArray(json?.data)) return json.data;
@@ -190,6 +202,34 @@ function roleMaxEmployees(project, roleName) {
 }
 
 /* =========================
+   Multi-level Role Helpers
+========================= */
+const LEVEL_OPTIONS = ["Junior", "Mid", "Senior", "Lead", "Architect"];
+
+function emptyLevelRow() {
+  return {
+    level: "Senior",
+    employees: "1",
+    expertise: [],
+    manDays: "",
+    onsiteDays: "",
+    workingHoursPerDay: "8",
+    salaryPerHour: "",
+  };
+}
+
+function emptyRoleRow() {
+  return {
+    roleName: "",
+    requiredCompetencies: [],
+    domain: "",
+    technology: "",
+    experienceLevel: "", // kept for backward compatibility (optional)
+    levels: [emptyLevelRow()],
+  };
+}
+
+/* =========================
    Component
 ========================= */
 export default function ServiceRequestForm({
@@ -232,27 +272,24 @@ export default function ServiceRequestForm({
     furtherInformation: "",
   });
 
-  const emptyRoleRow = useCallback(
-    () => ({
-      roleName: "",
-      employees: "1",
-      requiredCompetencies: [],
-      domain: "",
-      technology: "",
-      experienceLevel: "",
-      manDays: "",
-      onsiteDays: "",
-    }),
-    [],
-  );
-
-  const [roles, setRoles] = useState([emptyRoleRow()]);
-
-  const [mustHave, setMustHave] = useState(["", "", ""]); // max 3
-  const [niceToHave, setNiceToHave] = useState(["", "", "", "", ""]); // max 5
+  // ✅ request-level requirements (renamed concept)
+  const [requirementsMustHave, setRequirementsMustHave] = useState([
+    "",
+    "",
+    "",
+  ]); // max 3
+  const [requirementsNiceToHave, setRequirementsNiceToHave] = useState([
+    "",
+    "",
+    "",
+    "",
+    "",
+  ]); // max 5
 
   const emptyLangRow = useCallback(() => ({ language: "", level: "B2" }), []);
   const [languages, setLanguages] = useState([emptyLangRow()]);
+
+  const [roles, setRoles] = useState([emptyRoleRow()]);
 
   const titleTouchedRef = useRef(false);
 
@@ -351,35 +388,14 @@ export default function ServiceRequestForm({
       furtherInformation: initialRequest.furtherInformation || "",
     }));
 
-    const reqRoles =
-      Array.isArray(initialRequest.roles) && initialRequest.roles.length
-        ? initialRequest.roles
-        : [emptyRoleRow()];
-
-    setRoles(
-      reqRoles.map((r) => ({
-        ...emptyRoleRow(),
-        roleName: r.roleName || "",
-        employees:
-          r.numberOfEmployees != null ? String(r.numberOfEmployees) : "1",
-        requiredCompetencies: Array.isArray(r.requiredCompetencies)
-          ? r.requiredCompetencies
-          : [],
-        domain: r.domain || "",
-        technology: r.technology || "",
-        experienceLevel: r.experienceLevel || "",
-        manDays: r.manDays ?? "",
-        onsiteDays: r.onsiteDays ?? "",
-      })),
-    );
-
-    setMustHave([
+    // requirements (renamed)
+    setRequirementsMustHave([
       initialRequest.mustHaveCriteria?.[0] || "",
       initialRequest.mustHaveCriteria?.[1] || "",
       initialRequest.mustHaveCriteria?.[2] || "",
     ]);
 
-    setNiceToHave([
+    setRequirementsNiceToHave([
       initialRequest.niceToHaveCriteria?.[0] || "",
       initialRequest.niceToHaveCriteria?.[1] || "",
       initialRequest.niceToHaveCriteria?.[2] || "",
@@ -387,6 +403,64 @@ export default function ServiceRequestForm({
       initialRequest.niceToHaveCriteria?.[4] || "",
     ]);
 
+    // roles (supports BOTH old and new shape)
+    const incomingRoles =
+      Array.isArray(initialRequest.roles) && initialRequest.roles.length
+        ? initialRequest.roles
+        : [emptyRoleRow()];
+
+    const normalizedRoles = incomingRoles.map((r) => {
+      const hasLevels = Array.isArray(r.levels) && r.levels.length;
+
+      // legacy single-level fields -> convert to one level row
+      const legacyLevel = {
+        level: safeStr(r.experienceLevel) || "Senior",
+        employees:
+          r.numberOfEmployees != null ? String(r.numberOfEmployees) : "1",
+        expertise: Array.isArray(r.expertise) ? r.expertise : [],
+        manDays: r.manDays ?? "",
+        onsiteDays: r.onsiteDays ?? "",
+        workingHoursPerDay: r.workingHoursPerDay ?? "8",
+        salaryPerHour: r.salaryPerHour ?? "",
+      };
+
+      const levels = hasLevels
+        ? r.levels.map((lv) => ({
+            level: safeStr(lv.level) || "Senior",
+            employees:
+              lv.employees != null
+                ? String(lv.employees)
+                : lv.count != null
+                  ? String(lv.count)
+                  : "0",
+            expertise: Array.isArray(lv.expertise)
+              ? lv.expertise
+              : Array.isArray(lv.skills)
+                ? lv.skills
+                : [],
+            manDays: lv.manDays ?? "",
+            onsiteDays: lv.onsiteDays ?? "",
+            workingHoursPerDay: lv.workingHoursPerDay ?? "8",
+            salaryPerHour: lv.salaryPerHour ?? "",
+          }))
+        : [legacyLevel];
+
+      return {
+        ...emptyRoleRow(),
+        roleName: r.roleName || "",
+        requiredCompetencies: Array.isArray(r.requiredCompetencies)
+          ? r.requiredCompetencies
+          : [],
+        domain: r.domain || "",
+        technology: r.technology || "",
+        experienceLevel: r.experienceLevel || "",
+        levels: levels.length ? levels : [emptyLevelRow()],
+      };
+    });
+
+    setRoles(normalizedRoles);
+
+    // languages
     const langInput = initialRequest.requiredLanguagesWithLevel || [];
     const langRows = Array.isArray(langInput)
       ? langInput
@@ -399,7 +473,7 @@ export default function ServiceRequestForm({
       : [];
 
     setLanguages(langRows.length ? langRows : [emptyLangRow()]);
-  }, [mode, initialRequest, emptyRoleRow, emptyLangRow]);
+  }, [mode, initialRequest, emptyLangRow]);
 
   /* ---------------- Derived: project role options ---------------- */
   const projectRoleOptions = useMemo(() => {
@@ -416,24 +490,26 @@ export default function ServiceRequestForm({
     [selectedProject],
   );
 
-  /* ---------------- Auto-fill criteria from project/roles ---------------- */
-  const recomputeCriteriaFromSelection = useCallback(
+  /* ---------------- Criteria auto-fill ---------------- */
+  const recomputeRequirementsFromSelection = useCallback(
     (nextRoles) => {
+      // Must-have requirements: from required competencies of selected roles
       const comp = uniq(
         (nextRoles || [])
           .flatMap((rr) => rr.requiredCompetencies || [])
           .map((x) => safeStr(x)),
       ).slice(0, 3);
 
-      setMustHave((prev) => {
+      setRequirementsMustHave((prev) => {
         const userTouched = prev.some((x) => safeStr(x));
         return userTouched
           ? prev
           : [comp[0] || "", comp[1] || "", comp[2] || ""];
       });
 
+      // Nice-to-have requirements: from project selected skills
       const skills = (selectedProject?.selectedSkills || []).slice(0, 5);
-      setNiceToHave((prev) => {
+      setRequirementsNiceToHave((prev) => {
         const userTouched = prev.some((x) => safeStr(x));
         return userTouched
           ? prev
@@ -461,33 +537,54 @@ export default function ServiceRequestForm({
         const all = projectRoleOptions.map((opt) => {
           const maxEmp = roleMaxEmployees(selectedProject, opt.value);
           const base = opt.defaultEmployees || "1";
-          const clamped = String(clampInt(base, 1, maxEmp ?? 999999));
+          const total = String(clampInt(base, 1, maxEmp ?? 999999));
+
           return {
+            ...emptyRoleRow(),
             roleName: opt.value,
-            employees: clamped,
             requiredCompetencies: opt.requiredCompetencies || [],
-            domain: "",
-            technology: "",
-            experienceLevel: "",
-            manDays: "",
-            onsiteDays: "",
+            levels: [
+              {
+                ...emptyLevelRow(),
+                level: "Senior",
+                employees: total,
+              },
+            ],
           };
         });
+
         const next = all.length ? all : [emptyRoleRow()];
         setRoles(next);
-        recomputeCriteriaFromSelection(next);
+        recomputeRequirementsFromSelection(next);
       }
 
       if (value === "SINGLE") {
         setRoles((prev) => {
           const first = prev?.[0] ? prev[0] : emptyRoleRow();
           const maxEmp = roleMaxEmployees(selectedProject, first.roleName);
-          const clamped =
-            first.employees === ""
-              ? ""
-              : String(clampInt(first.employees, 1, maxEmp ?? 999999));
-          const next = [{ ...first, employees: clamped }];
-          recomputeCriteriaFromSelection(next);
+
+          // keep role but clamp employees by summing levels
+          const sum = (first.levels || [])
+            .map((lv) => Number(lv.employees))
+            .filter((n) => Number.isFinite(n))
+            .reduce((a, b) => a + b, 0);
+
+          const clampedSum = maxEmp ? Math.min(sum || 1, maxEmp) : sum || 1;
+
+          const next = [
+            {
+              ...first,
+              levels: [
+                {
+                  ...emptyLevelRow(),
+                  ...(first.levels?.[0] || {}),
+                  employees: String(clampedSum),
+                },
+              ],
+            },
+          ];
+
+          recomputeRequirementsFromSelection(next);
           return next;
         });
       }
@@ -529,63 +626,62 @@ export default function ServiceRequestForm({
           : ""),
     }));
 
+    // Build roles based on project type
     if (typeNow === "TEAM") {
       const all = (proj?.roles || []).map((r) => {
         const maxEmp = roleMaxEmployees(proj, r.requiredRole);
         const base = r.numberOfEmployees || "1";
-        const clamped = String(clampInt(base, 1, maxEmp ?? 999999));
+        const total = String(clampInt(base, 1, maxEmp ?? 999999));
+
         return {
           ...emptyRoleRow(),
           roleName: r.requiredRole,
-          employees: clamped,
           requiredCompetencies: r.requiredCompetencies || [],
+          levels: [
+            {
+              ...emptyLevelRow(),
+              level: "Senior",
+              employees: total,
+            },
+          ],
         };
       });
+
       const next = all.length ? all : [emptyRoleRow()];
       setRoles(next);
-      recomputeCriteriaFromSelection(next);
-    } else if (typeNow === "SINGLE") {
-      const first = proj?.roles?.[0];
-      const roleName = first?.requiredRole || "";
-      const maxEmp = roleMaxEmployees(proj, roleName);
-      const base = first?.numberOfEmployees || "1";
-      const clamped = String(clampInt(base, 1, maxEmp ?? 999999));
-      const next = [
-        first
-          ? {
-              ...emptyRoleRow(),
-              roleName,
-              employees: clamped,
-              requiredCompetencies: first.requiredCompetencies || [],
-            }
-          : emptyRoleRow(),
-      ];
-      setRoles(next);
-      recomputeCriteriaFromSelection(next);
+      recomputeRequirementsFromSelection(next);
     } else {
-      // MULTI
+      // SINGLE or MULTI starts with first project role
       const first = proj?.roles?.[0];
       const roleName = first?.requiredRole || "";
       const maxEmp = roleMaxEmployees(proj, roleName);
       const base = first?.numberOfEmployees || "1";
-      const clamped = String(clampInt(base, 1, maxEmp ?? 999999));
+      const total = String(clampInt(base, 1, maxEmp ?? 999999));
 
       const next = [
         first
           ? {
               ...emptyRoleRow(),
               roleName,
-              employees: clamped,
               requiredCompetencies: first.requiredCompetencies || [],
+              levels: [
+                {
+                  ...emptyLevelRow(),
+                  level: "Senior",
+                  employees: total,
+                },
+              ],
             }
           : emptyRoleRow(),
       ];
+
       setRoles(next);
-      recomputeCriteriaFromSelection(next);
+      recomputeRequirementsFromSelection(next);
     }
 
+    // auto-fill nice-to-have requirements (if untouched)
     const skills = (proj?.selectedSkills || []).slice(0, 5);
-    setNiceToHave((prev) => {
+    setRequirementsNiceToHave((prev) => {
       const userTouched = prev.some((x) => safeStr(x));
       return userTouched
         ? prev
@@ -616,7 +712,7 @@ export default function ServiceRequestForm({
     setRoles((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], ...patch };
-      recomputeCriteriaFromSelection(next);
+      recomputeRequirementsFromSelection(next);
       return next;
     });
   };
@@ -625,7 +721,7 @@ export default function ServiceRequestForm({
     if (form.type !== "MULTI") return;
     setRoles((prev) => {
       const next = [...prev, emptyRoleRow()];
-      recomputeCriteriaFromSelection(next);
+      recomputeRequirementsFromSelection(next);
       return next;
     });
   };
@@ -635,7 +731,7 @@ export default function ServiceRequestForm({
     setRoles((prev) => {
       const next =
         prev.length === 1 ? prev : prev.filter((_, i) => i !== index);
-      recomputeCriteriaFromSelection(next);
+      recomputeRequirementsFromSelection(next);
       return next;
     });
   };
@@ -650,20 +746,49 @@ export default function ServiceRequestForm({
       return next;
     });
 
-  const totalEmployees = useMemo(() => {
-    const nums = roles
-      .map((r) => Number(r.employees))
-      .filter((n) => Number.isFinite(n));
-    return nums.reduce((a, b) => a + b, 0);
+  const totalEmployeesSelected = useMemo(() => {
+    const sum = roles
+      .flatMap((r) => r.levels || [])
+      .map((lv) => Number(lv.employees))
+      .filter((n) => Number.isFinite(n))
+      .reduce((a, b) => a + b, 0);
+    return sum;
   }, [roles]);
 
-  /* ---------------- Build payload (your backend shape) ---------------- */
+  const totalEstimatedCost = useMemo(() => {
+    // Simple estimation: salaryPerHour * hours/day * manDays * employees
+    // (assumes manDays is per employee for that level)
+    let total = 0;
+
+    for (const role of roles || []) {
+      for (const lv of role.levels || []) {
+        const emp = Number(lv.employees);
+        const manDays = Number(lv.manDays);
+        const hrs = Number(lv.workingHoursPerDay);
+        const salary = Number(lv.salaryPerHour);
+
+        if (
+          Number.isFinite(emp) &&
+          Number.isFinite(manDays) &&
+          Number.isFinite(hrs) &&
+          Number.isFinite(salary)
+        ) {
+          total += emp * manDays * hrs * salary;
+        }
+      }
+    }
+
+    return Number.isFinite(total) ? total : 0;
+  }, [roles]);
+
+  /* ---------------- Build payload (backend shape) ---------------- */
   const buildPayload = () => {
-    const must = mustHave
+    const must = requirementsMustHave
       .map((x) => safeStr(x))
       .filter(Boolean)
       .slice(0, 3);
-    const nice = niceToHave
+
+    const nice = requirementsNiceToHave
       .map((x) => safeStr(x))
       .filter(Boolean)
       .slice(0, 5);
@@ -690,6 +815,7 @@ export default function ServiceRequestForm({
       taskDescription: safeStr(form.taskDescription),
       furtherInformation: safeStr(form.furtherInformation),
 
+      // ✅ renamed concept but keep keys for backend compatibility
       mustHaveCriteria: must,
       niceToHaveCriteria: nice,
 
@@ -700,22 +826,32 @@ export default function ServiceRequestForm({
         }))
         .filter((x) => x.language),
 
+      // ✅ multi-level roles
       roles: (roles || [])
         .map((r) => ({
           roleName: safeStr(r.roleName) || null,
           requiredCompetencies: uniq(
             (r.requiredCompetencies || []).map((x) => safeStr(x)),
           ),
-          numberOfEmployees: numOrNull(r.employees),
           domain: safeStr(r.domain) || null,
           technology: safeStr(r.technology) || null,
-          experienceLevel: safeStr(r.experienceLevel) || null,
-          manDays: numOrNull(r.manDays),
-          onsiteDays: numOrNull(r.onsiteDays),
+
+          levels: (r.levels || []).map((lv) => ({
+            level: safeStr(lv.level) || "Senior",
+            employees: numOrNull(lv.employees) ?? 0,
+            expertise: uniq((lv.expertise || []).map((x) => safeStr(x))).filter(
+              Boolean,
+            ),
+            manDays: numOrNull(lv.manDays),
+            onsiteDays: numOrNull(lv.onsiteDays),
+            workingHoursPerDay: numOrNull(lv.workingHoursPerDay),
+            salaryPerHour: numOrNull(lv.salaryPerHour),
+          })),
         }))
         .filter((x) => x.roleName),
 
-      requiredEmployeesTotal: totalEmployees,
+      requiredEmployeesTotal: totalEmployeesSelected,
+      estimatedTotalCost: totalEstimatedCost || 0,
     };
   };
 
@@ -741,19 +877,64 @@ export default function ServiceRequestForm({
       }
     }
 
-    // ✅ enforce role max employees from project
-    for (const rr of payload.roles || []) {
-      const maxEmp = roleMaxEmployees(selectedProject, rr.roleName);
-      const entered = Number(rr.numberOfEmployees);
-      if (maxEmp && Number.isFinite(entered) && entered > maxEmp) {
+    // ✅ per-role employees must match project limit (if known)
+    for (const role of payload.roles || []) {
+      const maxEmp = roleMaxEmployees(selectedProject, role.roleName);
+      const sum = (role.levels || [])
+        .map((lv) => Number(lv.employees))
+        .filter((n) => Number.isFinite(n))
+        .reduce((a, b) => a + b, 0);
+
+      if (maxEmp && sum > maxEmp) {
         return setErr(
-          `Employees for role "${rr.roleName}" cannot exceed ${maxEmp} (project limit).`,
+          `Role "${role.roleName}" exceeds project limit. Selected=${sum}, Max=${maxEmp}`,
         );
       }
-      if (Number.isFinite(entered) && entered < 1) {
+
+      // You asked: "If employees > 1, PM can split by experience levels"
+      // ✅ enforce that the sum is >= 1 (if role selected)
+      if (sum < 1) {
         return setErr(
-          `Employees for role "${rr.roleName}" must be at least 1.`,
+          `Role "${role.roleName}" must have at least 1 employee in total (across levels).`,
         );
+      }
+
+      // ✅ validate level fields
+      for (const lv of role.levels || []) {
+        const emp = Number(lv.employees);
+        if (!Number.isFinite(emp) || emp < 0) {
+          return setErr(
+            `Invalid employees for "${role.roleName}" level "${lv.level}".`,
+          );
+        }
+
+        const h = Number(lv.workingHoursPerDay);
+        if (Number.isFinite(h) && (h < 1 || h > 24)) {
+          return setErr(
+            `Hours/day for "${role.roleName}" level "${lv.level}" must be 1..24.`,
+          );
+        }
+
+        const s = Number(lv.salaryPerHour);
+        if (Number.isFinite(s) && s < 0) {
+          return setErr(
+            `Salary/hour for "${role.roleName}" level "${lv.level}" cannot be negative.`,
+          );
+        }
+
+        const md = Number(lv.manDays);
+        if (Number.isFinite(md) && md < 0) {
+          return setErr(
+            `Man days for "${role.roleName}" level "${lv.level}" cannot be negative.`,
+          );
+        }
+
+        const od = Number(lv.onsiteDays);
+        if (Number.isFinite(od) && od < 0) {
+          return setErr(
+            `Onsite days for "${role.roleName}" level "${lv.level}" cannot be negative.`,
+          );
+        }
       }
     }
 
@@ -803,8 +984,8 @@ export default function ServiceRequestForm({
               : "Create Service Request"}
           </h2>
           <p className="text-[11px] text-slate-400">
-            Select a project → roles & criteria auto-fill. Adjust only what you
-            need.
+            Select a project → roles & requirements auto-fill. Split employees
+            by experience level with different costs.
           </p>
         </div>
 
@@ -877,13 +1058,21 @@ export default function ServiceRequestForm({
             <option value="TEAM">Team (all project roles)</option>
           </select>
 
-          <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
-            <p className="text-[11px] text-slate-500">
-              Total employees (selected)
-            </p>
-            <p className="text-sm font-semibold text-slate-100">
-              {totalEmployees || "—"}
-            </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
+              <p className="text-[11px] text-slate-500">Employees (total)</p>
+              <p className="text-sm font-semibold text-slate-100">
+                {totalEmployeesSelected || "—"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
+              <p className="text-[11px] text-slate-500">Est. Cost (€)</p>
+              <p className="text-sm font-semibold text-slate-100">
+                {totalEstimatedCost
+                  ? Math.round(totalEstimatedCost).toLocaleString()
+                  : "—"}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -1033,15 +1222,17 @@ export default function ServiceRequestForm({
         </div>
       </div>
 
-      {/* ROLES (from project) */}
+      {/* ROLES */}
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <h3 className="text-sm font-semibold text-slate-100">
-              Roles (from Project)
+              Roles (multi-level workforce)
             </h3>
             <p className="text-xs text-slate-500">
-              SINGLE = one role, MULTI = multiple roles, TEAM = auto all roles.
+              For each role, split employees by experience level. Each level can
+              have different salary, hours/day, man days, onsite days,
+              expertise.
             </p>
           </div>
 
@@ -1061,12 +1252,18 @@ export default function ServiceRequestForm({
           {roles.map((r, idx) => {
             const maxEmp = roleMaxEmployees(selectedProject, r.roleName);
 
+            const sumRoleEmployees = (r.levels || [])
+              .map((lv) => Number(lv.employees))
+              .filter((n) => Number.isFinite(n))
+              .reduce((a, b) => a + b, 0);
+
             return (
               <div
                 key={idx}
-                className="rounded-2xl border border-slate-800 bg-slate-950/30 p-3"
+                className="rounded-2xl border border-slate-800 bg-slate-950/30 p-3 space-y-3"
               >
-                <div className="grid gap-3 grid-cols-1 md:grid-cols-4">
+                {/* Role row header */}
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-4 items-end">
                   <div className="md:col-span-2">
                     <label className="text-[11px] text-slate-400">Role</label>
                     <select
@@ -1077,21 +1274,15 @@ export default function ServiceRequestForm({
                           (x) => x.value === roleName,
                         );
 
-                        const maxE = roleMaxEmployees(
-                          selectedProject,
-                          roleName,
-                        );
-                        const base =
-                          opt?.defaultEmployees || r.employees || "1";
-                        const clamped =
-                          base === ""
-                            ? ""
-                            : String(clampInt(base, 1, maxE ?? 999999));
+                        // If role changes, we keep levels but set competencies
+                        const nextLevels = r.levels?.length
+                          ? r.levels
+                          : [emptyLevelRow()];
 
                         setRoleAt(idx, {
                           roleName,
                           requiredCompetencies: opt?.requiredCompetencies || [],
-                          employees: clamped,
+                          levels: nextLevels,
                         });
                       }}
                       disabled={!selectedProject || form.type === "TEAM"}
@@ -1111,7 +1302,7 @@ export default function ServiceRequestForm({
 
                     {!!r.requiredCompetencies?.length && (
                       <p className="mt-2 text-[11px] text-slate-500">
-                        Required competencies:{" "}
+                        Role competencies:{" "}
                         <span className="text-slate-300">
                           {r.requiredCompetencies.join(", ")}
                         </span>
@@ -1119,57 +1310,291 @@ export default function ServiceRequestForm({
                     )}
                   </div>
 
-                  <div>
-                    <label className="text-[11px] text-slate-400">
-                      Employees for this role
-                    </label>
-                    <input
-                      type="number"
-                      value={r.employees}
-                      min={1}
-                      max={maxEmp ?? undefined}
-                      disabled={
-                        !selectedProject || form.type === "TEAM" || !r.roleName
-                      }
-                      onChange={(e) => {
-                        const raw = e.target.value;
-
-                        if (raw === "") {
-                          setRoleAt(idx, { employees: "" });
-                          return;
-                        }
-
-                        const clamped = clampInt(raw, 1, maxEmp ?? 999999);
-                        setRoleAt(idx, { employees: String(clamped) });
-                      }}
-                      className="mt-1 w-full border border-slate-700 rounded-xl px-3 py-2 bg-slate-950/40 disabled:opacity-60"
-                    />
-
-                    {maxEmp ? (
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        Max allowed:{" "}
-                        <span className="text-slate-200 font-semibold">
-                          {maxEmp}
-                        </span>
-                      </p>
-                    ) : r.roleName ? (
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        Max allowed: —
-                      </p>
-                    ) : null}
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
+                    <p className="text-[11px] text-slate-500">
+                      Employees (sum of levels)
+                    </p>
+                    <p className="text-sm font-semibold text-slate-100">
+                      {sumRoleEmployees || "—"}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Max allowed:{" "}
+                      <span className="text-slate-200 font-semibold">
+                        {maxEmp ?? "—"}
+                      </span>
+                    </p>
                   </div>
 
-                  <div className="flex items-end justify-end gap-2">
+                  <div className="flex justify-end">
                     {form.type === "MULTI" && roles.length > 1 && (
                       <button
                         type="button"
                         onClick={() => removeRoleRow(idx)}
                         className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-red-300"
                       >
-                        Remove
+                        Remove Role
                       </button>
                     )}
                   </div>
+                </div>
+
+                {/* Levels editor */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-100">
+                        Experience levels for this role
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Employees can be split across levels with different cost
+                        and effort.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={!r.roleName || form.type === "TEAM"}
+                      onClick={() => {
+                        const next = [...(r.levels || [])];
+                        next.push({
+                          ...emptyLevelRow(),
+                          level: "Mid",
+                          employees: "0",
+                        });
+                        setRoleAt(idx, { levels: next });
+                      }}
+                      className="text-xs px-3 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      + Add Level
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {(r.levels || []).map((lv, li) => (
+                      <div
+                        key={li}
+                        className="grid gap-2 grid-cols-1 md:grid-cols-8 rounded-xl border border-slate-800 p-2"
+                      >
+                        {/* Level */}
+                        <div className="md:col-span-1">
+                          <label className="text-[11px] text-slate-400">
+                            Level
+                          </label>
+                          <select
+                            value={lv.level}
+                            disabled={!r.roleName}
+                            onChange={(e) => {
+                              const next = [...r.levels];
+                              next[li] = { ...next[li], level: e.target.value };
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/40 disabled:opacity-60"
+                          >
+                            {LEVEL_OPTIONS.map((x) => (
+                              <option key={x} value={x}>
+                                {x}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Employees */}
+                        <div className="md:col-span-1">
+                          <label className="text-[11px] text-slate-400">
+                            Employees
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={!r.roleName || form.type === "TEAM"}
+                            value={lv.employees}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const next = [...r.levels];
+                              next[li] = { ...next[li], employees: raw };
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/40 disabled:opacity-60"
+                          />
+                        </div>
+
+                        {/* Expertise */}
+                        <div className="md:col-span-2">
+                          <label className="text-[11px] text-slate-400">
+                            Expertise (comma separated)
+                          </label>
+
+                          <input
+                            value={lv.expertiseText ?? ""}
+                            disabled={!r.roleName}
+                            onChange={(e) => {
+                              const text = e.target.value;
+
+                              // ✅ ALWAYS keep what the user typed (so comma/space never "disappears")
+                              const next = [...r.levels];
+                              next[li] = { ...next[li], expertiseText: text };
+
+                              // ✅ ALSO maintain parsed array (non-destructive)
+                              const list = text
+                                .split(/[,\n]+/)
+                                .map((s) => s.trim())
+                                .filter(Boolean);
+
+                              next[li].expertise = Array.from(new Set(list));
+
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            onKeyDown={(e) => {
+                              // optional: allow Enter to separate items without submitting the whole form
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                const text = (lv.expertiseText ?? "") + "\n";
+                                const next = [...r.levels];
+                                next[li] = { ...next[li], expertiseText: text };
+                                setRoleAt(idx, { levels: next });
+                              }
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-xl px-3 py-2 bg-slate-950/40 disabled:opacity-60"
+                            placeholder="e.g. React, Next.js, Node"
+                          />
+
+                          {/* optional: show parsed tags preview */}
+                          {!!(lv.expertise || []).length && (
+                            <p className="mt-1 text-[10px] text-slate-500">
+                              Parsed:{" "}
+                              <span className="text-slate-200">
+                                {(lv.expertise || []).join(", ")}
+                              </span>
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Man Days */}
+                        <div className="md:col-span-1">
+                          <label className="text-[11px] text-slate-400">
+                            Man Days
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={!r.roleName}
+                            value={lv.manDays}
+                            onChange={(e) => {
+                              const next = [...r.levels];
+                              next[li] = {
+                                ...next[li],
+                                manDays: e.target.value,
+                              };
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/40 disabled:opacity-60"
+                            placeholder="e.g. 45"
+                          />
+                        </div>
+
+                        {/* Onsite Days */}
+                        <div className="md:col-span-1">
+                          <label className="text-[11px] text-slate-400">
+                            Onsite Days
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={!r.roleName}
+                            value={lv.onsiteDays}
+                            onChange={(e) => {
+                              const next = [...r.levels];
+                              next[li] = {
+                                ...next[li],
+                                onsiteDays: e.target.value,
+                              };
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/40 disabled:opacity-60"
+                            placeholder="e.g. 25"
+                          />
+                        </div>
+
+                        {/* Hours/day */}
+                        <div className="md:col-span-1">
+                          <label className="text-[11px] text-slate-400">
+                            Hours/Day
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={24}
+                            disabled={!r.roleName}
+                            value={lv.workingHoursPerDay}
+                            onChange={(e) => {
+                              const next = [...r.levels];
+                              next[li] = {
+                                ...next[li],
+                                workingHoursPerDay: e.target.value,
+                              };
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/40 disabled:opacity-60"
+                            placeholder="8"
+                          />
+                        </div>
+
+                        {/* Salary/hour */}
+                        <div className="md:col-span-1">
+                          <label className="text-[11px] text-slate-400">
+                            €/Hour
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.5"
+                            disabled={!r.roleName}
+                            value={lv.salaryPerHour}
+                            onChange={(e) => {
+                              const next = [...r.levels];
+                              next[li] = {
+                                ...next[li],
+                                salaryPerHour: e.target.value,
+                              };
+                              setRoleAt(idx, { levels: next });
+                            }}
+                            className="mt-1 w-full border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/40 disabled:opacity-60"
+                            placeholder="e.g. 45"
+                          />
+                        </div>
+
+                        {/* Remove level */}
+                        <div className="md:col-span-8 flex justify-end">
+                          {r.levels.length > 1 && (
+                            <button
+                              type="button"
+                              disabled={form.type === "TEAM"}
+                              onClick={() => {
+                                const next = r.levels.filter(
+                                  (_, j) => j !== li,
+                                );
+                                setRoleAt(idx, { levels: next });
+                              }}
+                              className="text-xs px-3 py-1 rounded-lg border border-red-700 text-red-300 hover:bg-red-900/30 disabled:opacity-60"
+                            >
+                              Remove Level
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* per-role hint */}
+                  {maxEmp ? (
+                    <p className="text-[11px] text-slate-500">
+                      Tip: total employees across levels should not exceed{" "}
+                      <span className="text-slate-200 font-semibold">
+                        {maxEmp}
+                      </span>{" "}
+                      for this role (project limit).
+                    </p>
+                  ) : null}
                 </div>
               </div>
             );
@@ -1177,27 +1602,29 @@ export default function ServiceRequestForm({
         </div>
       </div>
 
-      {/* Criteria: must + nice */}
+      {/* Requirements (Must + Nice) */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-3">
           <p className="text-sm font-semibold text-slate-100">
-            Must-have (auto from competencies)
+            Project Requirements (Must-have)
           </p>
-          <p className="text-xs text-slate-500">Max 3</p>
+          <p className="text-xs text-slate-500">
+            Max 3 (auto from role competencies)
+          </p>
           <div className="mt-3 space-y-2">
-            {mustHave.map((v, i) => (
+            {requirementsMustHave.map((v, i) => (
               <input
                 key={i}
                 value={v}
                 onChange={(e) =>
-                  setMustHave((p) => {
+                  setRequirementsMustHave((p) => {
                     const n = [...p];
                     n[i] = e.target.value;
                     return n;
                   })
                 }
                 className="w-full border border-slate-700 rounded-xl px-3 py-2 bg-slate-950/40"
-                placeholder="Must-have criterion"
+                placeholder="Must-have requirement"
               />
             ))}
           </div>
@@ -1205,23 +1632,25 @@ export default function ServiceRequestForm({
 
         <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-3">
           <p className="text-sm font-semibold text-slate-100">
-            Nice-to-have (auto from skills)
+            Project Requirements (Nice-to-have)
           </p>
-          <p className="text-xs text-slate-500">Max 5</p>
+          <p className="text-xs text-slate-500">
+            Max 5 (auto from project skills)
+          </p>
           <div className="mt-3 space-y-2">
-            {niceToHave.map((v, i) => (
+            {requirementsNiceToHave.map((v, i) => (
               <input
                 key={i}
                 value={v}
                 onChange={(e) =>
-                  setNiceToHave((p) => {
+                  setRequirementsNiceToHave((p) => {
                     const n = [...p];
                     n[i] = e.target.value;
                     return n;
                   })
                 }
                 className="w-full border border-slate-700 rounded-xl px-3 py-2 bg-slate-950/40"
-                placeholder="Nice-to-have criterion"
+                placeholder="Nice-to-have requirement"
               />
             ))}
           </div>
